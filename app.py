@@ -170,7 +170,7 @@ with st.sidebar:
                 "gemini-2.5-flash-lite",
                 "gemini-3.5-flash",
                 "gemini-3.1-flash-lite",
-                "Gemma 4"
+                "Gemma4"
             ],
             index=0
         )
