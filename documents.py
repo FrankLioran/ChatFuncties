@@ -15,14 +15,33 @@ from typing import List, Dict, Any
 # 1. Embeddings via SentenceTransformers (HF-compatibel)
 # ---------------------------------------------------------
 from sentence_transformers import SentenceTransformer
+import streamlit as st
 
 EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-_embedder = SentenceTransformer(EMBED_MODEL_NAME)
+
+@st.cache_resource(show_spinner=False)
+def get_embedder():
+    """
+    Laadt het embedding-model één keer.
+    Streamlit bewaart het daarna in het geheugen.
+    """
+    return SentenceTransformer(
+        EMBED_MODEL_NAME,
+        device="cpu"
+    )
 
 def get_embedding_cached(text: str):
-    """Genereert een embedding via SentenceTransformers."""
+    """
+    Genereert een embedding.
+    Bij een fout wordt een nulvector teruggegeven zodat Eva blijft draaien.
+    """
     try:
-        return _embedder.encode(text, convert_to_numpy=True)
+        embedder = get_embedder()
+        return embedder.encode(
+            text,
+            convert_to_numpy=True,
+            normalize_embeddings=True
+        )
     except Exception as e:
         logging.exception(f"Embedding fout: {e}")
         return np.zeros(384, dtype=np.float32)
