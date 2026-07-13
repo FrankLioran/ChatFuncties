@@ -178,7 +178,7 @@ def answer_question(question: str, context: str, use_document_index: bool = True
                     "parts": [
                         {"text": prompt},
                         {"text": json.dumps({
-                            "persona": persona_json,
+                            "persona": active_persona,
                             "description": description_json
                         }, ensure_ascii=False)}
                     ]
