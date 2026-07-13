@@ -183,7 +183,11 @@ with st.sidebar:
             ],
             index=0
         )
-
+    
+    used = st.session_state.get("used_tokens", 0)
+    st.sidebar.progress(used / 400_000)
+    st.sidebar.caption(f"{used:,} / 400 000 tokens gebruikt")
+        
     # Temperature
     st.session_state.temperature = st.slider(
         "Temperature",
