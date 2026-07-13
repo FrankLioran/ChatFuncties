@@ -176,11 +176,9 @@ with st.sidebar:
         st.session_state["groq_model"] = st.selectbox(
             "Groq model",
             [
-                "llama3.1-70b-versatile",
-                "llama3.1-8b-instant",
-                "llama3.2-3b-preview",
-                "mixtral-8x7b-32768",
-                "gemma2-9b-it"
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b",
             ],
             index=0
         )
