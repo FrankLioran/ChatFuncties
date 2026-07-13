@@ -78,15 +78,6 @@ from image import (
 st.set_page_config(page_title="Eva — Vraag & Antwoord", layout="wide")
 
 # ---------------------------------------------------------
-# 5. Gemini configuratie
-# ---------------------------------------------------------
-#if GEMINI_API_KEY:
-#    genai.configure(api_key=GEMINI_API_KEY)
-#else:
-#    st.error("Geen GEMINI_API_KEY gevonden. Voeg deze toe via Hugging Face Secrets.")
-#    st.stop()
-
-# ---------------------------------------------------------
 # 6. Sessiestatus initialiseren
 # ---------------------------------------------------------
 if "session_id" not in st.session_state:
