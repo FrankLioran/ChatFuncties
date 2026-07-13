@@ -163,36 +163,21 @@ def answer_question(question: str, context: str, use_document_index: bool = True
 
         client = genai.Client(api_key=gemini_api_key)
 
-        prompt = (
-            f"{system_msg_content}\n\n"
-            f"{final_context}\n\n"
-            f"{chat_ctx}\n\n"
-            f"Vraag:\n{question}\n\nAntwoord:"
-        )
+            prompt = (
+                f"{system_msg_content}\n\n"
+                f"{final_context}\n\n"
+                f"{chat_ctx}\n\n"
+                f"Vraag:\n{question}\n\nAntwoord:"
+            )
 
-        response = client.models.generate_content(
-            model=chat_model_name,
-            contents=[
-                {
-                    "role": "user",
-                    "parts": [
-                        {"text": prompt},
-                        {"text": json.dumps({
-                            "persona": active_persona,
-                            "description": description_json
-                        }, ensure_ascii=False)}
-                    ]
-                }
-            ],
-            generation_config={
-                "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
-            }
-        )
-        
-        answer = response.text.strip()
-        return answer or "[Geen antwoord van Gemini]"
+            response = client.models.generate_content(
+                model=chat_model_name,   # <-- FIX!
+                contents=prompt,
+            )
 
-    except Exception as e:
-        logging.exception("Gemini fout")
-        return f"[FOUT bij Gemini: {e}]"
+            answer = response.text.strip()
+            return answer or "[Geen antwoord van Gemini]"
 
+        except Exception as e:
+            logging.exception("Gemini fout")
+            return f"[FOUT bij Gemini: {e}]"
