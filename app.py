@@ -163,6 +163,13 @@ with st.sidebar:
         ],
         index=0
     )
+    
+    st.header("AI Provider")
+    st.session_state["ai_provider"] = st.selectbox(
+        "Kies een AI-provider",
+        ["Gemini", "Groq"],
+        index=0
+    )
 
     # Temperature
     st.session_state.temperature = st.slider(
