@@ -79,10 +79,4 @@ def log_event(event_type: str, details: dict):
     except Exception as e:
         logging.exception(f"Kon auditlog niet schrijven: {e}")
 
-# utils.py
-FREE_TOKEN_BUDGET = 400_000   # je eigen safe‑margin
-if st.session_state.get("used_tokens", 0) + new_prompt_tokens > FREE_TOKEN_BUDGET:
-    st.warning("We naderen de gratis limiet. Ik zal nu korter antwoorden.")
-    temperature = 0.5
-    max_tokens = 300
 
