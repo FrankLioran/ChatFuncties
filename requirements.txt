@@ -2,7 +2,7 @@ streamlit
 PyMuPDF
 pandas
 numpy
-sentence-transformers==2.2.2
+sentence-transformers
 torch
 google-genai
 beautifulsoup4
