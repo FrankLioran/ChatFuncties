@@ -1,5 +1,5 @@
 streamlit
-PyMuPDF==1.23.8
+PyMuPDF
 pandas
 numpy
 sentence-transformers==2.2.2
