@@ -163,7 +163,7 @@ with st.sidebar:
         index=0
     )
 
-    if st.session_state["ai_provider"] == "Groq":
+    if st.session_state["ai_provider"] == "Gemini":
         st.session_state.model_name = st.selectbox(
             "Modelnaam",
             [
