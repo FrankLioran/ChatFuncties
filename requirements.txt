@@ -2,13 +2,12 @@ streamlit
 PyMuPDF==1.23.8
 pandas
 numpy
-sentence-transformers
-torch
+sentence-transformers==2.2.2
+torch==2.2.0
 google-genai
 beautifulsoup4
 requests
 openpyxl
 odfpy
-Pillow
+pillow
 python-dotenv
-
