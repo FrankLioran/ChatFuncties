@@ -86,26 +86,3 @@ if st.session_state.get("used_tokens", 0) + new_prompt_tokens > FREE_TOKEN_BUDGE
     temperature = 0.5
     max_tokens = 300
 
-# utils.py
-def update_token_usage(usage: dict):
-    """Voeg de gebruikte tokens van één request toe aan de sessie."""
-    prompt = usage.get("prompt_tokens", 0)
-    completion = usage.get("completion_tokens", 0)
-    total = prompt + completion
-    st.session_state["used_tokens"] = st.session_state.get("used_tokens", 0) + total
-
-# Optioneel: log naar bestand
-from pathlib import Path, json
-log_path = Path("Logs/usage.json")
-entry = {
-    "timestamp": time.time(),
-    "prompt": prompt,
-    "completion": completion,
-    "total": total,
-}
-if log_path.exists():
-    data = json.loads(log_path.read_text())
-else:
-    data = []
-data.append(entry)
-log_path.write_text(json.dumps(data, indent=2))
