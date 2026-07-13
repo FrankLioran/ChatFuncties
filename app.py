@@ -159,7 +159,7 @@ with st.sidebar:
         "Modelnaam",
         [
             "gemini-2.5-flash-lite",
-            "gemini-2.5-pro"
+            "gemini-2.5-flash"
         ],
         index=0
     )
@@ -168,6 +168,13 @@ with st.sidebar:
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
         ["Gemini", "Groq"],
+        index=0
+    )
+
+    if st.session_state["ai_provider"] == "Groq":
+    st.session_state["groq_model"] = st.selectbox(
+        "Groq model",
+        ["llama3-70b-8192", "llama3-8b-8192", "gemma2-9b-it", "mixtral-8x7b-32768"],
         index=0
     )
 
