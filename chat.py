@@ -187,36 +187,46 @@ def answer_question(question: str, context: str, use_document_index: bool = True
     # -----------------------------
     # PROVIDER: GROQ
     # -----------------------------
-    groq_key = st.secrets.get("GROQ_API_KEY", None)
-    if not groq_key:
-        return "[Geen Groq API key gevonden]"
+    if provider == "Groq":
+        try:
+            groq_key = st.secrets.get("GROQ_API_KEY", None)
+            if not groq_key:
+                return "[Geen Groq API key gevonden]"
+            
+            groq_model = st.session_state.get("groq_model", "llama3-70b-8192")
     
-    groq_model = st.session_state.get("groq_model", "llama3-70b-8192")
+            payload = {
+                "model": groq_model,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
+            }
     
-    payload = {
-        "model": groq_model,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
-    }
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}"},
+                json=payload,
+                timeout=30
+            )
     
-    resp = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {groq_key}"},
-        json=payload,
-        timeout=30
-    )
+            data = resp.json()
     
-    data = resp.json()
+            # Veilig uitlezen
+            if "choices" not in data or len(data["choices"]) == 0:
+                return f"[Groq gaf een onverwachte response terug: {data}]"
     
-    choice = data["choices"][0]
+            choice = data["choices"][0]
     
-    if "message" in choice:
-        answer = choice["message"]["content"]
-    elif "text" in choice:
-        answer = choice["text"]
-    else:
-        answer = "[Groq gaf een onverwachte response terug]"
+            if "message" in choice:
+                answer = choice["message"]["content"]
+            elif "text" in choice:
+                answer = choice["text"]
+            else:
+                answer = f"[Groq gaf een onverwachte response terug: {choice}]"
     
-    return answer or "[Geen antwoord van Groq]"
+            return answer or "[Geen antwoord van Groq]"
+    
+        except Exception as e:
+            logging.exception("Groq fout")
+            return f"[FOUT bij Groq: {e}]"
