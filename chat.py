@@ -109,16 +109,11 @@ Contextregels:
 # 6. Hoofdfunctie: Eva's antwoord
 # ---------------------------------------------------------
 def answer_question(question: str, context: str, use_document_index: bool = True):
-    st.session_state["debug_active_model"] = "Gemini"
+    provider = st.session_state.get("ai_provider", "Gemini")
+    st.session_state["debug_active_model"] = provider
 
     system_msg_content = system_prompt()
     chat_model_name = st.session_state.get("model_name", DEFAULT_MODEL_NAME)
-
-    # -----------------------------
-    # ComfyUI (uitgeschakeld)
-    # -----------------------------
-    if "comfy-local" in chat_model_name.lower():
-        return "[ComfyUI is niet beschikbaar op Hugging Face Spaces]"
 
     # -----------------------------
     # RAG context
@@ -154,30 +149,72 @@ def answer_question(question: str, context: str, use_document_index: bool = True
         )
 
     # -----------------------------
-    # Gemini flow — nieuwe google.genai API
+    # Prompt bouwen
     # -----------------------------
-    try:
-        gemini_api_key = get_gemini_api_key()
-        if not gemini_api_key:
-            return "[Geen Gemini API key gevonden]"
+    prompt = (
+        f"{system_msg_content}\n\n"
+        f"{final_context}\n\n"
+        f"{chat_ctx}\n\n"
+        f"Vraag:\n{question}\n\nAntwoord:"
+    )
 
-        client = genai.Client(api_key=gemini_api_key)
+    # -----------------------------
+    # PROVIDER: GEMINI
+    # -----------------------------
+    if provider == "Gemini":
+        try:
+            gemini_api_key = get_gemini_api_key()
+            if not gemini_api_key:
+                return "[Geen Gemini API key gevonden]"
 
-        prompt = (
-            f"{system_msg_content}\n\n"
-            f"{final_context}\n\n"
-            f"{chat_ctx}\n\n"
-            f"Vraag:\n{question}\n\nAntwoord:"
-        )
+            client = genai.Client(api_key=gemini_api_key)
 
-        response = client.models.generate_content(
-            model=chat_model_name,   # <-- FIX!
-            contents=prompt,
-        )
+            response = client.models.generate_content(
+                model=chat_model_name,
+                contents=prompt,
+                generation_config={
+                    "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
+                }
+            )
 
-        answer = response.text.strip()
-        return answer or "[Geen antwoord van Gemini]"
+            answer = response.text.strip()
+            return answer or "[Geen antwoord van Gemini]"
 
-    except Exception as e:
-        logging.exception("Gemini fout")
-        return f"[FOUT bij Gemini: {e}]"
+        except Exception as e:
+            logging.exception("Gemini fout")
+            return f"[FOUT bij Gemini: {e}]"
+
+    # -----------------------------
+    # PROVIDER: GROQ
+    # -----------------------------
+    if provider == "Groq":
+        try:
+            groq_key = st.secrets.get("GROQ_API_KEY", None)
+            if not groq_key:
+                return "[Geen Groq API key gevonden]"
+
+            payload = {
+                "model": "llama3-70b-8192",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
+            }
+
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}"},
+                json=payload,
+                timeout=30
+            )
+
+            data = resp.json()
+            answer = data["choices"][0]["message"]["content"]
+            return answer or "[Geen antwoord van Groq]"
+
+        except Exception as e:
+            logging.exception("Groq fout")
+            return f"[FOUT bij Groq: {e}]"
+
+    return "[Onbekende provider]"
+
