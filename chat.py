@@ -192,9 +192,9 @@ def answer_question(question: str, context: str, use_document_index: bool = True
             groq_key = st.secrets.get("GROQ_API_KEY", None)
             if not groq_key:
                 return "[Geen Groq API key gevonden]"
-
+    
             groq_model = st.session_state.get("groq_model", "llama3-70b-8192")
-            
+    
             payload = {
                 "model": groq_model,
                 "messages": [
@@ -202,21 +202,27 @@ def answer_question(question: str, context: str, use_document_index: bool = True
                 ],
                 "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
             }
-
+    
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {groq_key}"},
                 json=payload,
                 timeout=30
             )
-
+    
             data = resp.json()
-            answer = data["choices"][0]["message"]["content"]
+    
+            choice = data["choices"][0]
+    
+            if "message" in choice:
+                answer = choice["message"]["content"]
+            elif "text" in choice:
+                answer = choice["text"]
+            else:
+                answer = "[Groq gaf een onverwachte response terug]"
+    
             return answer or "[Geen antwoord van Groq]"
-
+    
         except Exception as e:
             logging.exception("Groq fout")
             return f"[FOUT bij Groq: {e}]"
-
-    return "[Onbekende provider]"
-
