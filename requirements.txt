@@ -1,0 +1,14 @@
+streamlit
+pymupdf==1.23.8
+pandas
+numpy
+sentence-transformers
+torch
+google-genai
+beautifulsoup4
+requests
+openpyxl
+odfpy
+Pillow
+python-dotenv
+
