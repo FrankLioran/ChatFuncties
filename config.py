@@ -39,8 +39,10 @@ EMBEDDING_DIMENSION = 384
 USER_AGENT = "EvaApp/1.0"
 
 # ---------------------------------------------------------
-# 5. Secrets (Hugging Face)
+# 5. Secrets (streamlit.io)
 # ---------------------------------------------------------
 # Hugging Face gebruikt environment variables voor secrets.
 # Voeg GEMINI_API_KEY toe via: Settings → Secrets → GEMINI_API_KEY
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
