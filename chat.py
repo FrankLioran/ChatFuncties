@@ -173,13 +173,22 @@ def answer_question(question: str, context: str, use_document_index: bool = True
         response = client.models.generate_content(
             model=chat_model_name,
             contents=[
-                {"role": "user", "parts": [{"text": prompt}]}
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt},
+                        {"text": json.dumps({
+                            "persona": persona_json,
+                            "description": description_json
+                        }, ensure_ascii=False)}
+                    ]
+                }
             ],
             generation_config={
                 "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
             }
         )
-
+        
         answer = response.text.strip()
         return answer or "[Geen antwoord van Gemini]"
 
