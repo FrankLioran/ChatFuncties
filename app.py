@@ -155,6 +155,14 @@ with st.sidebar:
 
     # Modelinstellingen
     st.header("Modelinstellingen")
+
+    st.header("AI Provider")
+    st.session_state["ai_provider"] = st.selectbox(
+        "Kies een AI-provider",
+        ["Gemini", "Groq"],
+        index=0
+    )
+    
     st.session_state.model_name = st.selectbox(
         "Modelnaam",
         [
@@ -163,18 +171,17 @@ with st.sidebar:
         ],
         index=0
     )
-    
-    st.header("AI Provider")
-    st.session_state["ai_provider"] = st.selectbox(
-        "Kies een AI-provider",
-        ["Gemini", "Groq"],
-        index=0
-    )
 
     if st.session_state["ai_provider"] == "Groq":
         st.session_state["groq_model"] = st.selectbox(
             "Groq model",
-            ["llama3-70b-8192", "llama3-8b-8192", "gemma2-9b-it", "mixtral-8x7b-32768"],
+            [
+                "llama3.1-70b-versatile",
+                "llama3.1-8b-instant",
+                "llama3.2-3b-preview",
+                "mixtral-8x7b-32768",
+                "gemma2-9b-it"
+            ],
             index=0
         )
 
