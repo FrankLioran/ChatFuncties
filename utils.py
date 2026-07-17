@@ -82,30 +82,40 @@ def log_event(event_type: str, details: dict):
 
 def chat_to_txt(messages: list) -> str:
     """
-    Zet de volledige chat om naar een tekstbestand.
-    Geschikt voor Streamlit DownloadButton.
+    Zet de chatgeschiedenis om naar een downloadbare tekst.
     """
-
     lines = []
-
-    lines.append("=" * 70)
+    lines.append("=" * 72)
     lines.append("Eva Lumen Chat")
-    lines.append("=" * 70)
-    lines.append(f"Datum     : {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}")
-    lines.append(f"Provider  : {st.session_state.get('ai_provider', '-')}")
-    lines.append(f"Model     : {st.session_state.get('model_name', '-')}")
-    lines.append(f"Persona   : {st.session_state.get('active_persona', '-')}")
-    lines.append(f"Temperatuur : {st.session_state.get('temperature', '-')}")
-    lines.append("=" * 70)
+    lines.append("=" * 72)
+    lines.append(f"Datum        : {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}")
+    lines.append(f"Provider     : {st.session_state.get('ai_provider', '-')}")
+    lines.append(f"Laatste model: {st.session_state.get('model_name', '-')}")
+    lines.append(f"Persona      : {st.session_state.get('active_persona', '-')}")
+    lines.append(f"Temperature  : {st.session_state.get('temperature', '-')}")
+    lines.append("=" * 72)
     lines.append("")
 
     for message in messages:
 
-        role = message["role"].upper()
+        role = message.get("role", "").upper()
 
         lines.append(role)
         lines.append("-" * len(role))
-        lines.append(message["content"])
+
+        # Alleen als provider/model aanwezig zijn
+        if role == "ASSISTANT":
+            provider = message.get("provider")
+            model = message.get("model")
+
+            if provider or model:
+                lines.append(f"[{provider} - {model}]")
+                lines.append("")
+
+        lines.append(message.get("content", ""))
+
+        lines.append("")
+        lines.append("-" * 72)
         lines.append("")
 
     return "\n".join(lines)
