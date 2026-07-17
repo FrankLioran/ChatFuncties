@@ -5,6 +5,7 @@ import random
 import os
 import json
 import google.genai as genai
+from utils import chat_to_txt
 
 from pathlib import Path
 
@@ -228,6 +229,18 @@ with st.sidebar:
     st.subheader("📊 Index status")
     st.write(f"Full index: **{len(st.session_state.get('document_index', []))} chunks**")
     st.write(f"Lazy index: **{len(st.session_state.get('document_index_lazy', []))} documenten**")
+    
+    st.markdown("---")
+    st.header("💾 Chat")
+
+    chat_text = chat_to_txt(st.session_state.messages)
+    
+    st.download_button(
+        label="📥 Download gesprek",
+        data=chat_text,
+        file_name=f"EvaChat_{Path().cwd().name}.txt",
+        mime="text/plain"
+    )
 
 # ---------------------------------------------------------
 # 10. Chat input
