@@ -193,7 +193,7 @@ def answer_question(question: str, context: str, use_document_index: bool = True
             if not groq_key:
                 return "[Geen Groq API key gevonden]"
             
-            groq_model = st.session_state.get("groq_model", "llama3.1-70b-versatile")
+            groq_model = st.session_state.get("model_name", "openai/gpt-oss-120b")
 
             payload = {
                 "model": groq_model,
