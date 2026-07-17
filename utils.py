@@ -1,6 +1,7 @@
 # utils.py — Hugging Face compatibele versie
 import numpy as np
 import json
+import streamlit as st
 from datetime import datetime, timezone
 from pathlib import Path
 import logging
@@ -79,4 +80,32 @@ def log_event(event_type: str, details: dict):
     except Exception as e:
         logging.exception(f"Kon auditlog niet schrijven: {e}")
 
+def chat_to_txt(messages: list) -> str:
+    """
+    Zet de volledige chat om naar een tekstbestand.
+    Geschikt voor Streamlit DownloadButton.
+    """
 
+    lines = []
+
+    lines.append("=" * 70)
+    lines.append("Eva Lumen Chat")
+    lines.append("=" * 70)
+    lines.append(f"Datum     : {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}")
+    lines.append(f"Provider  : {st.session_state.get('ai_provider', '-')}")
+    lines.append(f"Model     : {st.session_state.get('model_name', '-')}")
+    lines.append(f"Persona   : {st.session_state.get('active_persona', '-')}")
+    lines.append(f"Temperatuur : {st.session_state.get('temperature', '-')}")
+    lines.append("=" * 70)
+    lines.append("")
+
+    for message in messages:
+
+        role = message["role"].upper()
+
+        lines.append(role)
+        lines.append("-" * len(role))
+        lines.append(message["content"])
+        lines.append("")
+
+    return "\n".join(lines)
