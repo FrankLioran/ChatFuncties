@@ -178,7 +178,7 @@ with st.sidebar:
         )
 
     if st.session_state["ai_provider"] == "Groq":
-        st.session_state["groq_model"] = st.selectbox(
+        st.session_state["model_name"] = st.selectbox(
             "Groq model",
             [
                 "openai/gpt-oss-120b",
@@ -248,15 +248,32 @@ with st.sidebar:
 user_input = st.chat_input("Typ je vraag…")
 
 if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input,
+        "provider": None,
+        "model": None
+    })
+    
     answer = answer_question(user_input, context="", use_document_index=True)
 
     if isinstance(answer, bytes):
         st.session_state.messages.append({"role": "assistant", "content": "[[IMAGE_RESULT]]"})
         with st.chat_message("assistant"):
             st.image(answer)
-    else:
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+    
+    else:    
+        model = st.session_state.get("model_name")
+    
+        if st.session_state.get("ai_provider") == "Groq":
+            model = st.session_state.get("model_name")
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "provider": st.session_state.get("ai_provider"),
+            "model": model
+        })
 
 # ---------------------------------------------------------
 # 11. Chatweergave
