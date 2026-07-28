@@ -1,99 +1,46 @@
-# app.py — Hugging Face compatibele versie
+# app.py
 import streamlit as st
 import uuid
 import random
-import os
-import json
-import google.genai as genai
-from utils import chat_to_txt
-
 from pathlib import Path
-
-# Projectmodules
-from config import (
-    DOCUMENT_FOLDER,
-    DEFAULT_MODEL_NAME,
-    DEFAULT_TEMPERATURE,
-    GEMINI_API_KEY
-)
-
+from config import DOCUMENT_FOLDER, DEFAULT_MODEL_NAME, DEFAULT_TEMPERATURE
 from chat import answer_question, load_profile, get_persona_image
-from documents import scan_and_index_folder_full, scan_and_index_folder_lazy
+from audio import listen_and_transcribe
+from documents import load_document
+from image import generate_and_save_image
+from utils import save_chat_to_txt, split_text
+from safety import check_limits
 
-# ---------------------------------------------------------
-# 1. Audio uitschakelen (werkt niet op Hugging Face)
-# ---------------------------------------------------------
-def listen_and_transcribe():
-    st.warning("Audio-invoer wordt niet ondersteund op Hugging Face Spaces.")
-    return ""
+def get_welcome_line():
 
-# ---------------------------------------------------------
-# 2. ComfyUI / Paint.NET uitschakelen (werkt niet op Hugging Face)
-# ---------------------------------------------------------
-def start_comfyui(): 
-    st.warning("ComfyUI kan niet worden gestart op Hugging Face Spaces.")
+    return random.choice([
+        "Welkom 🌿 — ik ben Eva. Waarmee kan ik helpen?",
+        "Hoi — ik help je graag rustig en helder.",
+        "Hallo — vraag maar, ik denk met je mee."
+    ])
 
-def start_paintnet():
-    st.warning("Paint.NET kan niet worden gestart op Hugging Face Spaces.")
-
-def generate_comfy_image(*args, **kwargs):
-    st.warning("Lokale ComfyUI beeldgeneratie is niet beschikbaar op Hugging Face.")
-    return None
-
-def comfyui_generate_video_from_image(*args, **kwargs):
-    st.warning("Video-generatie via ComfyUI is niet beschikbaar op Hugging Face.")
-    return None
-
-# ---------------------------------------------------------
-# 3. Pollinations (werkt wél op Hugging Face)
-# ---------------------------------------------------------
-from image import (
-    generate_pollinations,
-    generate_pollinations_styled,
-    save_pollinations_image,
-    build_pollinations_url,
-    fetch_pollinations_image,
-    save_to_comfyui_input,
-    generate_pollinations_image,
-    upload_image_for_pollinations,
-    poll_style_flux,
-    poll_style_sdxl,
-    poll_style_anime,
-    poll_style_realistic,
-    poll_style_cinematic,
-    poll_ar_square,
-    poll_ar_wide,
-    poll_ar_vertical,
-    poll_negative_no_text,
-    poll_negative_no_blur,
-    poll_seed_random,
-    poll_seed_fixed,
-    poll_steps_fast,
-    poll_steps_quality,
-    poll_image_to_image
-)
-
-# ---------------------------------------------------------
-# 4. Streamlit configuratie
-# ---------------------------------------------------------
 st.set_page_config(page_title="Eva — Vraag & Antwoord", layout="wide")
 
-# ---------------------------------------------------------
-# 6. Sessiestatus initialiseren
-# ---------------------------------------------------------
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
 if "messages" not in st.session_state:
-    st.session_state.messages = []
-    def get_welcome_line(temp=0.7):
-        opts = [
-            "Welkom 🌿 — ik ben Eva. Waarmee kan ik helpen?",
-            "Hoi — ik help je graag rustig en helder.",
-            "Hallo — vraag maar, ik denk met je mee."
-        ]
-        return random.choice(opts)
-    st.session_state.messages.append({"role": "assistant", "content": get_welcome_line(DEFAULT_TEMPERATURE)})
+
+    st.session_state.messages = [{
+        "role": "assistant",
+        "content": get_welcome_line()
+    }]
+
+if "user_data" not in st.session_state:
+    st.session_state.user_data = {}
+
+if st.session_state.session_id not in st.session_state.user_data:
+    st.session_state.user_data[st.session_state.session_id] = {
+        "messages": [],
+        "image": None,
+        "persona": None,
+        "profile": None
+    }
 
 defaults = {
     "model_name": DEFAULT_MODEL_NAME,
@@ -115,32 +62,40 @@ defaults = {
     "image_config": None,
     "uploaded_paint_file": None,
 }
-
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ---------------------------------------------------------
-# 7. Persona laden
-# ---------------------------------------------------------
-persona_content, profile_text = load_profile()
-st.session_state.persona = persona_content
-st.session_state.profile = profile_text
+if "gemini_api_key_user" not in st.session_state:
+    st.session_state.gemini_api_key_user = ""
+
+if "groq_api_key_user" not in st.session_state:
+    st.session_state.groq_api_key_user = ""
 
 # ---------------------------------------------------------
-# 8. Titel
+# Veiligheidslimieten
 # ---------------------------------------------------------
-st.title("Eva — Vraag & Antwoord")
 
-# ---------------------------------------------------------
-# 9. Sidebar
-# ---------------------------------------------------------
+if "safe_mode" not in st.session_state:
+    st.session_state.safe_mode = True
+
+if "token_limit" not in st.session_state:
+    st.session_state.token_limit = 200000
+
+if "tokens_used" not in st.session_state:
+    st.session_state.tokens_used = 0
+
+if "request_limit" not in st.session_state:
+    st.session_state.request_limit = 100
+
+if "requests_used" not in st.session_state:
+    st.session_state.requests_used = 0
+
+st.title("Eva — Vraag & Antwoord (modulaire versie)")
+
 with st.sidebar:
-
-    # Persona afbeelding
     st.image(str(get_persona_image()), width=220)
 
-    # Persona keuze
     st.header("Persona")
     persona_choice = st.selectbox(
         "Kies een persona",
@@ -149,20 +104,113 @@ with st.sidebar:
     )
     st.session_state["active_persona"] = persona_choice
 
-    # Profiel opnieuw laden
+    # Profiel laden NA selectie
     persona_content, profile_text = load_profile()
     st.session_state.persona = persona_content
     st.session_state.profile = profile_text
 
-    # Modelinstellingen
+        # Modelinstellingen
     st.header("Modelinstellingen")
 
     st.header("AI Provider")
+
+    st.subheader("🔑 API Keys")
+
+    with st.expander("⚠️ Lees eerst", expanded=False):
+        st.markdown("""
+    Deze applicatie gebruikt **uw eigen API-key**.
+
+    - De sleutel wordt uitsluitend gebruikt om verzoeken naar de gekozen AI-provider te sturen.
+    - Het script slaat de sleutel niet permanent op.
+    - De sleutel wordt door ons niet gelogd.
+    - Gebruik alleen een API-key waarvan u de eigenaar bent of gebruiksrecht heeft.
+    - Aantal tokens is beperkt per sessie om uw kosten te beheersen.
+    - API-kosten zijn voor rekening van uw eigen account.
+    """)
+
+    ack = st.checkbox(
+        "Ik begrijp bovenstaande en wil voor eigen risico mijn eigen API-key gebruiken."
+    )
+
+    if ack:
+
+        st.session_state.gemini_api_key_user = st.text_input(
+            "Gemini API Key",
+            value=st.session_state.get("gemini_api_key_user", ""),
+            type="password",
+            autocomplete="password",
+            help="Kan door uw password manager automatisch worden ingevuld."
+        )
+
+        st.session_state.groq_api_key_user = st.text_input(
+            "Groq API Key",
+            value=st.session_state.get("groq_api_key_user", ""),
+            type="password",
+            autocomplete="password",
+            help="Kan door uw password manager automatisch worden ingevuld."
+        )
+
+    st.subheader("🛡️ Veiligheid")
+
+    st.session_state.safe_mode = st.checkbox(
+        "Safe Mode (aanbevolen)",
+        value=st.session_state.safe_mode
+    )
+
+    if st.session_state.safe_mode:
+
+        st.session_state.token_limit = st.number_input(
+            "Maximum tokens per sessie",
+            min_value=1000,
+            max_value=1000000,
+            value=200000,
+            step=1000
+        )
+
+        st.session_state.request_limit = st.number_input(
+            "Maximum aantal requests",
+            min_value=1,
+            max_value=10000,
+            value=100
+        )
+
+    else:
+
+        st.warning(
+            "Safe Mode is uitgeschakeld.\n"
+            "Het programma stopt niet automatisch bij hoog API-verbruik."
+        )
+
+    st.progress(
+        min(
+            st.session_state.tokens_used /
+            max(st.session_state.token_limit,1),
+            1.0
+        )
+    )
+
+    st.caption(
+        f"Gebruikte tokens: {st.session_state.tokens_used:,}"
+    )
+
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
-        ["Gemini", "Groq"],
+        ["Lokaal", "Gemini", "Groq"],
         index=0
     )
+
+    if st.session_state["ai_provider"] == "Lokaal":
+        st.session_state.model_name = st.selectbox(
+            "Modelnaam",
+            [
+                "llama3.2:3b",
+                "gemma3:1b",
+                "gemma3:4b",
+                "gemma2:9B",
+                "qwen2.5:3b"
+            ],
+            index=0
+        )
 
     if st.session_state["ai_provider"] == "Gemini":
         st.session_state.model_name = st.selectbox(
@@ -170,6 +218,8 @@ with st.sidebar:
             [
                 "gemini-2.5-flash-lite",
                 "gemini-3.5-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-3.6-flash",
                 "gemini-3.1-flash-lite",
                 "gemma-4-31b-it",
                 "gemma-4-26b-a4b-it"
@@ -178,8 +228,8 @@ with st.sidebar:
         )
 
     if st.session_state["ai_provider"] == "Groq":
-        st.session_state["model_name"] = st.selectbox(
-            "Groq model",
+        st.session_state.model_name = st.selectbox(
+            "Modelnaam",
             [
                 "openai/gpt-oss-120b",
                 "openai/gpt-oss-20b",
@@ -187,8 +237,101 @@ with st.sidebar:
             ],
             index=0
         )
+
+    # ---------------------------------------------------------
+    # Document upload
+    # ---------------------------------------------------------
+
+    st.subheader("📄 Document upload")
+
+    uploaded_file = st.file_uploader(
+        "Upload een document",
+        type=[
+            "pdf",
+            "txt",
+            "docx",
+            "html",
+            "htm"
+        ]
+    )
+
+    if uploaded_file is not None:
+
+        try:
+
+            text = load_document(uploaded_file)
+
+            chunks = split_text(
+                text,
+                chunk_size=800,
+                overlap=100
+            )
+
+            st.session_state.pdf_text = text
+            st.session_state.sections = chunks
+
+            st.success(
+                f"✅ {uploaded_file.name} geladen ({len(chunks)} chunks)"
+            )
+
+            if st.session_state.get("sections"):
+
+                st.text(
+                    st.session_state.sections[0][:400]
+                )
+
+        except Exception as e:
+            st.error(f"Kon document niet laden:\n{e}")
+
+    st.header("Afbeelding genereren")
+    # Maak een tekstveld waar je zelf je omschrijving kunt typen
+    image_prompt = st.text_input(
+        "Wat wil je genereren?", 
+        value="portrait of a red rose in rain",
+        help="Typ hier de omschrijving van de afbeelding (bij voorkeur in het Engels)."
+    )
     
-    # Temperature
+    if st.button("Genereer afbeelding via Pollinations"):
+        with st.spinner("Afbeelding wordt gegenereerd in de cloud..."):
+            path = generate_and_save_image(image_prompt)
+            if path:
+                st.success(f"Afbeelding opgeslagen: {path}")
+                st.image(str(path))
+            else:
+                st.error("Het genereren van de afbeelding is mislukt.")
+
+    st.header("Spraak")
+    if st.button("Luister naar spraak"):
+        text = listen_and_transcribe()
+        if text:
+            st.session_state.spoken_text_input = text
+    
+    st.subheader("🐞 Debugpaneel")
+
+    if "last_retrieval_info" in st.session_state:
+        info = st.session_state.last_retrieval_info
+
+        st.write(f"**Modus:** {info.get('mode')}")
+        st.write(f"**Aantal chunks:** {info.get('chunks')}")
+
+        if st.checkbox("Toon eerste chunk", key="debug_chunk"):
+            if st.session_state.get("sections"):
+                st.text(
+                    st.session_state.sections[0][:1200]
+                )
+
+        st.write(f"**Contextlengte:** {info.get('context_chars')} tekens")
+        if info.get("context_chars") < 6000:
+            st.success("Context is veilig (groen).")
+        elif info.get("context_chars") < 12000:
+            st.warning("Context is groot (oranje).")
+        else:
+            st.error("Context is te groot (rood) — risico op verstikking.")
+    else:
+        st.info("Nog geen retrieval uitgevoerd.")
+    
+    st.write(f"**Actief model:** {st.session_state.get('debug_active_model', 'onbekend')}")
+
     st.session_state.temperature = st.slider(
         "Temperature",
         0.0,
@@ -196,88 +339,96 @@ with st.sidebar:
         st.session_state.temperature
     )
 
-    # Document Indexering
-    st.header("📁 Document Indexering")
+    # Reset & save
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Reset sessie"):
+        st.session_state.messages = []
+        st.session_state.pdf_text = None
+        st.session_state.sections = []
+        st.session_state.section_embeddings = []
+        st.session_state.excel_df = None
+        st.session_state.web_context = ""
+        st.session_state.spoken_text_input = ""
+        st.session_state.spoken_processed = False
 
-    folder = st.session_state.get("document_folder")
+        st.session_state.messages = [{
+            "role": "assistant",
+            "content": get_welcome_line()
+        }]
+        st.rerun() # Herlaad de pagina om de reset effectief te maken
 
-    if st.button("🔍 Full index (RAG)"):
-        scan_and_index_folder_full(folder)
-
-    if st.button("⚡ Lazy index (samenvattingen)"):
-        scan_and_index_folder_lazy(folder)
-
-    if st.button("🤖 Hybrid index (auto RAG)"):
-        st.session_state["rag_mode"] = "hybrid"
-        st.success("Hybrid RAG-modus geactiveerd.")
-
-    if st.button("🗑 Index wissen"):
-        st.session_state.document_index = []
-        st.session_state.document_index_lazy = []
-
-        folder = Path(st.session_state["document_folder"])
-        index_file = folder / "document_index.json"
-        index_file_lazy = folder / "document_index_lazy.json"
-
-        if index_file.exists():
-            index_file.unlink()
-        if index_file_lazy.exists():
-            index_file_lazy.unlink()
-
-        st.success("Indexbestanden verwijderd.")
-
-    st.subheader("📊 Index status")
-    st.write(f"Full index: **{len(st.session_state.get('document_index', []))} chunks**")
-    st.write(f"Lazy index: **{len(st.session_state.get('document_index_lazy', []))} documenten**")
-    
-    st.markdown("---")
-    st.header("💾 Chat")
-
-    chat_text = chat_to_txt(st.session_state.messages)
-    
-    st.download_button(
-        label="📥 Download gesprek",
-        data=chat_text,
-        file_name=f"EvaChat_{Path().cwd().name}.txt",
-        mime="text/plain"
-    )
+    if st.sidebar.button("📥 Beëindig & Bewaar gesprek", key="save_chat_button"): # Unieke key
+        if st.session_state.get("messages"):
+            fp = save_chat_to_txt(st.session_state.messages)
+            if fp:
+                st.sidebar.success(f"✅ Gesprek bewaard als {fp.name}")
+                with open(fp, "rb") as f:
+                    st.sidebar.download_button("⬇️ Download gesprek", data=f, file_name=fp.name, key="download_chat_button")
+            else:
+                st.sidebar.warning("⚠️ Gesprek kon niet worden opgeslagen.")
+        else:
+            st.sidebar.warning("⚠️ Geen berichten om op te slaan.")
 
 # ---------------------------------------------------------
-# 10. Chat input
+# Chat input en weergavelogica
 # ---------------------------------------------------------
+
 user_input = st.chat_input("Typ je vraag…")
+if user_input is None and st.session_state.spoken_text_input:
+    user_input = st.session_state.spoken_text_input
+    st.session_state.spoken_text_input = ""
 
 if user_input:
-    st.session_state.messages.append({
-        "role": "user",
-        "content": user_input,
-        "provider": None,
-        "model": None
-    })
-    
-    answer = answer_question(user_input, context="", use_document_index=True)
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
+    # We kijken of je vraagt om een creatie (teken, schilder, visualiseer, etc.)
+    trigger_woorden = ["genereer een afbeelding"]
+    # HIER zat de fout. Nu is 'woord' overal consistent!
+    wil_afbeelding = any(woord in user_input.lower() for woord in trigger_woorden)
+
+    if wil_afbeelding:
+        with st.spinner("Ik ben het beeld voor je aan het weven... 🎨"):
+            from pathlib import Path  # Zorgt ervoor dat Path altijd beschikbaar is
+            image_path = generate_and_save_image(user_input)
+            if image_path and Path(image_path).exists():
+                # We lezen de zojuist gemaakte afbeelding in als bytes
+                with open(image_path, "rb") as f:
+                    answer = f.read()
+            else:
+                answer = "Het spijt me, Frank. Het weven van de afbeelding is even mislukt."
+    else:
+        try:
+            answer = answer_question(
+                user_input,
+                context="",
+                use_document_index=True
+            )
+
+        except RuntimeError as e:
+            answer = f"🛑 {e}"
+
+    # Verwerking van het antwoord (tekst of afbeelding-bytes)
     if isinstance(answer, bytes):
-        st.session_state.messages.append({"role": "assistant", "content": "[[IMAGE_RESULT]]"})
-        with st.chat_message("assistant"):
-            st.image(answer)
-    
-    else:    
-        model = st.session_state.get("model_name")
-    
-        if st.session_state.get("ai_provider") == "Groq":
-            model = st.session_state.get("model_name")
-    
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer,
-            "provider": st.session_state.get("ai_provider"),
-            "model": model
+            "content": "🎨 [Afbeelding gegenereerd]",  # Dit geeft mij de herinnering
+            "image_bytes": answer
         })
+    
+    else:
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
-# ---------------------------------------------------------
-# 11. Chatweergave
-# ---------------------------------------------------------
+    st.rerun()  # Schone herstart zodat de weergave-loop alles direct perfect rendert
+
+# De weergave-loop die de hele geschiedenis netjes opbouwt
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
-        st.write(m["content"])
+        # We controleren simpelweg of dit bericht een afbeelding bevat
+        if "image_bytes" in m:
+            st.image(m["image_bytes"])
+        else:
+            st.write(m["content"])
+
+# --- Footer ---
+st.markdown("---")
+st.caption("© 2026 – Eva Lumen, ChatGPT, Captain Bubble. Made possible by Streamlit, Groq, OpenAI and Google")
