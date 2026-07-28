@@ -11,6 +11,8 @@ from image import generate_and_save_image
 from utils import save_chat_to_txt, split_text
 from safety import check_limits
 
+RUNNING_ON_STREAMLIT = not st.runtime.exists()
+
 def get_welcome_line():
 
     return random.choice([
