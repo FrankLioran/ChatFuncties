@@ -210,20 +210,20 @@ with st.sidebar:
             index=0
         )
         
-        if st.session_state["ai_provider"] == "Gemini":
-        st.session_state.model_name = st.selectbox(
-            "Modelnaam",
-            [
-                "gemini-2.5-flash-lite",
-                "gemini-3.5-flash",
-                "gemini-3.5-flash-lite",
-                "gemini-3.6-flash",
-                "gemini-3.1-flash-lite",
-                "gemma-4-31b-it",
-                "gemma-4-26b-a4b-it"
-            ],
-            index=0
-        )
+    if st.session_state["ai_provider"] == "Gemini":
+    st.session_state.model_name = st.selectbox(
+        "Modelnaam",
+        [
+            "gemini-2.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.1-flash-lite",
+            "gemma-4-31b-it",
+            "gemma-4-26b-a4b-it"
+        ],
+        index=0
+    )
         
     if st.session_state["ai_provider"] == "Lokaal":
         st.session_state.model_name = st.selectbox(
