@@ -1,32 +1,81 @@
-# chat.py — Hugging Face compatibele versie
+# chat.py
 import logging
 import json
 from pathlib import Path
+
 import streamlit as st
 import requests
-import google.genai as genai
-
-from config import (
-    DEFAULT_MODEL_NAME,
-    DEFAULT_TEMPERATURE,
-    GEMINI_API_KEY,
-    PROFILE_FILENAME,
-)
 
 from documents import retrieve_context
-from utils import log_event
+from ai_router import ask_ai
+from safety import check_limits
+
+#from config import (
+#    DEFAULT_MODEL_NAME,
+#    DEFAULT_TEMPERATURE,
+#    LOCAL_SECRETS_PATH,
+#    PROFILE_FILENAME,
+#)
 
 # ---------------------------------------------------------
-# 1. ComfyUI uitschakelen (werkt niet op Hugging Face)
+# ComfyUI functie 
 # ---------------------------------------------------------
+
 def generate_image_comfy(prompt: str):
-    st.warning("ComfyUI beeldgeneratie is niet beschikbaar op Hugging Face Spaces.")
-    return None
+    workflow = {
+        "prompt": {
+            "0": {
+                "inputs": {
+                    "text": prompt
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "1": {
+                "inputs": {
+                    "seed": 12345,
+                    "steps": 20,
+                    "cfg": 7,
+                    "sampler_name": "euler",
+                    "scheduler": "normal",
+                    "denoise": 1.0,
+                    "model": "checkpoint",
+                    "positive": ["0"],
+                    "negative": []
+                },
+                "class_type": "KSampler"
+            },
+            "2": {
+                "inputs": {
+                    "samples": ["1"],
+                    "vae": "vae"
+                },
+                "class_type": "VAEDecode"
+            },
+            "3": {
+                "inputs": {
+                    "images": ["2"]
+                },
+                "class_type": "SaveImage"
+            }
+        }
+    }
 
+    response = requests.post("http://127.0.0.1:8188/prompt", json=workflow)
+    data = response.json()
+
+    # Haal de afbeelding op
+    image_name = data["output"]["images"][0]["filename"]
+    image_bytes = requests.get(f"http://127.0.0.1:8188/view?filename={image_name}").content
+
+    return image_bytes
 # ---------------------------------------------------------
-# 2. Persona-afbeelding laden
+# PROFIEL LADEN UIT eva_profile.json
 # ---------------------------------------------------------
+
 def get_persona_image():
+    """
+    Retourneert het pad naar de afbeelding die hoort bij de gekozen persona.
+    """
     choice = st.session_state.get("active_persona", "Eva Lumen")
 
     image_map = {
@@ -38,10 +87,10 @@ def get_persona_image():
     filename = image_map.get(choice, "default.jpg")
     return Path(__file__).parent / "images" / filename
 
-# ---------------------------------------------------------
-# 3. Profiel laden
-# ---------------------------------------------------------
 def load_profile():
+    """
+    Laadt het profiel op basis van de persona‑switcher.
+    """
     choice = st.session_state.get("active_persona", "Eva Lumen")
 
     profile_map = {
@@ -66,30 +115,29 @@ def load_profile():
         return "", ""
 
 # ---------------------------------------------------------
-# 4. Gemini API key ophalen
+# 3. SYSTEM PROMPT MET EVA'S PROFIEL
 # ---------------------------------------------------------
-def get_gemini_api_key():
-    user_provided_key = st.session_state.get("gemini_api_key_user", "")
-    if user_provided_key:
-        return user_provided_key.strip()
 
-    if GEMINI_API_KEY:
-        return GEMINI_API_KEY
-
-    return None
-
-# ---------------------------------------------------------
-# 5. System prompt bouwen
-# ---------------------------------------------------------
 def system_prompt():
+    """
+    Bouwt de system prompt op basis van:
+    - Het gekozen persona-profiel (JSON)
+    - Eventuele session_state overrides
+    - Document- en webcontext
+    """
+
+    # 1. Laad profiel uit JSON
     persona_json, description_json = load_profile()
 
+    # 2. Session overrides (optioneel)
     persona_session = st.session_state.get("persona", "")
     profile_session = st.session_state.get("profile", "")
 
+    # 3. Combineer profielinformatie
     persona_block = "\n".join([persona_json, persona_session]).strip()
     description_block = "\n".join([description_json, profile_session]).strip()
 
+    # 4. Bouw de system prompt
     base_prompt = f"""
 {persona_block}
 
@@ -106,127 +154,130 @@ Contextregels:
     return base_prompt
 
 # ---------------------------------------------------------
-# 6. Hoofdfunctie: Eva's antwoord
+# 4. HOOFD FUNCTIE: EVA'S ANTWOORD
 # ---------------------------------------------------------
-def answer_question(question: str, context: str, use_document_index: bool = True):
-    provider = st.session_state.get("ai_provider", "Gemini")
-    st.session_state["debug_active_model"] = provider
+def answer_question(
+    question: str,
+    context: str = "",
+    use_document_index: bool = True):
 
     system_msg_content = system_prompt()
-    chat_model_name = st.session_state.get("model_name", DEFAULT_MODEL_NAME)
 
-    # -----------------------------
-    # RAG context
-    # -----------------------------
+    rag_needed = (
+        bool(st.session_state.get("sections")) or
+        bool(st.session_state.get("document_index")) or
+        bool(st.session_state.get("document_index_lazy"))
+    )
+    check_limits()
     document_context_str = ""
-    if use_document_index:
+
+    if use_document_index and rag_needed:
+
         rag_mode = st.session_state.get("rag_mode", "auto")
-        document_context_str = retrieve_context(question, mode=rag_mode)
 
-    final_context = ""
-    if document_context_str:
-        final_context += f"Context uit documenten:\n{document_context_str}\n\n---\n\n"
-    if context:
-        final_context += f"Context uit geuploade bestanden:\n{context}\n\n---\n\n"
-    if st.session_state.get("web_context"):
-        final_context += f"Webcontext:\n{st.session_state['web_context']}\n\n---\n\n"
-    if not final_context.strip():
-        final_context = "(Geen extra context beschikbaar.)"
+        print(">>> retrieve_context wordt aangeroepen")
 
-    # -----------------------------
-    # Chatgeschiedenis
-    # -----------------------------
-    chat_history = []
-    if "messages" in st.session_state and st.session_state.messages:
-        for m in st.session_state.messages[-10:]:
-            chat_history.append({"role": m["role"], "content": m["content"]})
-
-    chat_ctx = ""
-    if chat_history:
-        chat_ctx = "\n".join(
-            f"{c['role'].capitalize()}: {c['content']}"
-            for c in chat_history
+        document_context_str = retrieve_context(
+            question,
+            mode=rag_mode
         )
 
-    # -----------------------------
-    # Prompt bouwen
-    # -----------------------------
-    prompt = (
-        f"{system_msg_content}\n\n"
-        f"{final_context}\n\n"
-        f"{chat_ctx}\n\n"
-        f"Vraag:\n{question}\n\nAntwoord:"
-    )
+        print(">>> retrieve_context klaar")
 
-    # -----------------------------
-    # PROVIDER: GEMINI
-    # -----------------------------
-    if provider == "Gemini":
-        try:
-            gemini_api_key = get_gemini_api_key()
-            if not gemini_api_key:
-                return "[Geen Gemini API key gevonden]"
+        if document_context_str is None:
+            document_context_str = ""
 
-            client = genai.Client(api_key=gemini_api_key)
+    # -------------------------------------------------
+    # Context opbouwen
+    # -------------------------------------------------
 
-            response = client.models.generate_content(
-                model=chat_model_name,
-                contents=prompt,
-                config={
-                    "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
-                }
-            )
+    final_context = ""
 
-            answer = response.text.strip()
-            return answer or "[Geen antwoord van Gemini]"
+    if document_context_str:
+        final_context += (
+            "Context uit documenten:\n"
+            f"{document_context_str}\n\n"
+            "---\n\n"
+        )
 
-        except Exception as e:
-            logging.exception("Gemini fout")
-            return f"[FOUT bij Gemini: {e}]"
+    if context:
+        final_context += (
+            "Context uit geüploade bestanden:\n"
+            f"{context}\n\n"
+            "---\n\n"
+        )
 
-    # -----------------------------
-    # PROVIDER: GROQ
-    # -----------------------------
-    if provider == "Groq":
-        try:
-            groq_key = st.secrets.get("GROQ_API_KEY", None)
-            if not groq_key:
-                return "[Geen Groq API key gevonden]"
-            
-            groq_model = st.session_state.get("model_name", "openai/gpt-oss-120b")
+    web_context = st.session_state.get("web_context", "")
 
-            payload = {
-                "model": groq_model,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": st.session_state.get("temperature", DEFAULT_TEMPERATURE)
-            }
-    
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {groq_key}"},
-                json=payload,
-                timeout=30
-            )
-    
-            data = resp.json()
-    
-            # Veilig uitlezen
-            if "choices" not in data or len(data["choices"]) == 0:
-                return f"[Groq gaf een onverwachte response terug: {data}]"
-    
-            choice = data["choices"][0]
-    
-            if "message" in choice:
-                answer = choice["message"]["content"]
-            elif "text" in choice:
-                answer = choice["text"]
-            else:
-                answer = f"[Groq gaf een onverwachte response terug: {choice}]"
-    
-            return answer or "[Geen antwoord van Groq]"
-    
-        except Exception as e:
-            logging.exception("Groq fout")
-            return f"[FOUT bij Groq: {e}]"
+    if web_context:
+        final_context += (
+            "Webcontext:\n"
+            f"{web_context}\n\n"
+            "---\n\n"
+        )
+
+    if not final_context:
+        final_context = "(Geen extra context beschikbaar.)"
+
+    # -------------------------------------------------
+    # Chatgeschiedenis
+    # -------------------------------------------------
+
+    chat_history = []
+
+    for m in st.session_state.get("messages", [])[-10:]:
+
+        chat_history.append({
+            "role": m["role"],
+            # .get() voorkomt een crash als 'content' ontbreekt (bijv. bij een afbeelding)
+            "content": m.get("content", "[Afbeelding]")
+        })
+
+    # -------------------------------------------------
+    # Messages voor AI
+    # -------------------------------------------------
+
+    messages = []
+
+    messages.append({
+        "role": "system",
+        "content": system_msg_content
+    })
+
+    if final_context:
+        messages.append({
+            "role": "system",
+            "content": final_context
+        })
+
+    messages.extend(chat_history)
+
+    messages.append({
+        "role": "user",
+        "content": question
+    })
+
+    # -------------------------------------------------
+    # Debug
+    # -------------------------------------------------
+
+    #print("=" * 80)
+    #print("MESSAGES NAAR AI")
+    #print("=" * 80)
+
+    #for i, m in enumerate(messages):
+    #    print(f"\n[{i}] {m['role']}")
+    #    print(m["content"][:300])
+
+    #print("=" * 80)
+
+    # -------------------------------------------------
+    # AI
+    # -------------------------------------------------
+
+    try:
+        return ask_ai(messages)
+
+    except Exception as exc:
+        logging.exception(exc)
+        return f"[FOUT: {exc}]"
