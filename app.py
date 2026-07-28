@@ -10,8 +10,9 @@ from documents import load_document
 from image import generate_and_save_image
 from utils import save_chat_to_txt, split_text
 from safety import check_limits
+import os
 
-RUNNING_ON_STREAMLIT = not st.runtime.exists()
+RUNNING_ON_STREAMLIT = "STREAMLIT_RUNTIME" in os.environ
 
 def get_welcome_line():
 
