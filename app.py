@@ -91,6 +91,11 @@ if "request_limit" not in st.session_state:
 if "requests_used" not in st.session_state:
     st.session_state.requests_used = 0
 
+if RUNNING_ON_STREAMLIT:
+    providers = ["Gemini", "Groq"]
+else:
+    providers = ["Lokaal", "Gemini", "Groq"]
+
 st.title("Eva — Vraag & Antwoord (modulaire versie)")
 
 with st.sidebar:
