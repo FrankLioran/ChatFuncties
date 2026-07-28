@@ -17,7 +17,7 @@ col_left, col_center, col_right = st.columns([1, 2, 1])
 with col_left:
     st.markdown("### ⚙️ Instellingen")
 
-    st.image("Eva3.jpg", caption="Eva", use_column_width=True)
+    st.image("Eva.jpg", caption="Eva", use_column_width=True)
 
     st.markdown("**Zoekmachines**")
     use_wikipedia = st.checkbox("Wikipedia", value=True)
