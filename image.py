@@ -22,8 +22,10 @@ def generate_and_save_image(prompt_text: str) -> Path | None:
         
         if response.status_code == 200:
             # Map controleren / aanmaken op Ubuntu
-            output_dir = Path("/home/frank/EvaStreamlit2/Generated_images")
-            output_dir.mkdir(exist_ok=True)
+
+            BASE_DIR = Path(__file__).resolve().parent
+            output_dir = BASE_DIR / "Generated_images"
+            output_dir.mkdir(parents=True, exist_ok=True)
             
             # Sla de afbeelding op met een unieke naam
             image_path = output_dir / f"generated_{os.urandom(4).hex()}.png"
