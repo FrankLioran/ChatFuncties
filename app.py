@@ -195,7 +195,7 @@ with st.sidebar:
 
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
-        ["Gemini", "Groq". "Lokaal"],
+        ["Lokaal", "Gemini", "Groq"],
         index=0)
     st.write("Lokaal niet beschikbaar via streamlit/internet")
 
