@@ -195,24 +195,22 @@ with st.sidebar:
 
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
-        ["Lokaal", "Gemini", "Groq"],
+        ["Groq","Gemini","Lokaal"],
         index=0)
     st.write("Lokaal niet beschikbaar via streamlit/internet")
 
-    if st.session_state["ai_provider"] == "Lokaal":
+    if st.session_state["ai_provider"] == "Groq":
         st.session_state.model_name = st.selectbox(
             "Modelnaam",
             [
-                "llama3.2:3b",
-                "gemma3:1b",
-                "gemma3:4b",
-                "gemma2:9B",
-                "qwen2.5:3b"
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b",
             ],
             index=0
         )
-
-    if st.session_state["ai_provider"] == "Gemini":
+        
+        if st.session_state["ai_provider"] == "Gemini":
         st.session_state.model_name = st.selectbox(
             "Modelnaam",
             [
@@ -226,14 +224,16 @@ with st.sidebar:
             ],
             index=0
         )
-
-    if st.session_state["ai_provider"] == "Groq":
+        
+    if st.session_state["ai_provider"] == "Lokaal":
         st.session_state.model_name = st.selectbox(
             "Modelnaam",
             [
-                "openai/gpt-oss-120b",
-                "openai/gpt-oss-20b",
-                "qwen/qwen3.6-27b",
+                "llama3.2:3b",
+                "gemma3:1b",
+                "gemma3:4b",
+                "gemma2:9B",
+                "qwen2.5:3b"
             ],
             index=0
         )
