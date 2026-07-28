@@ -1,7 +1,7 @@
 # audio.py — Hugging Face compatibele versie
 import streamlit as st
 from google import genai
-from config import GEMINI_API_KEY
+from api_keys import get_gemini_api_key
 
 def listen_and_transcribe():
     """
@@ -22,11 +22,13 @@ def listen_and_transcribe():
         return None
 
     # Configureer Gemini
-    if not GEMINI_API_KEY:
-        st.error("Geen GEMINI_API_KEY gevonden.")
+    api_key = get_gemini_api_key()
+    
+    if not api_key:
+        st.warning("Geen Gemini API key gevonden.")
         return None
-
-    genai.configure(api_key=GEMINI_API_KEY)
+    
+    client = genai.Client(api_key=api_key)    
 
     try:
         audio_bytes = uploaded_audio.read()
