@@ -1,6 +1,6 @@
 # audio.py — Hugging Face compatibele versie
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 from config import GEMINI_API_KEY
 
 def listen_and_transcribe():
