@@ -10,9 +10,6 @@ from documents import load_document
 from image import generate_and_save_image
 from utils import save_chat_to_txt, split_text
 from safety import check_limits
-import os
-
-RUNNING_ON_STREAMLIT = "STREAMLIT_RUNTIME" in os.environ
 
 def get_welcome_line():
 
@@ -94,11 +91,6 @@ if "request_limit" not in st.session_state:
 if "requests_used" not in st.session_state:
     st.session_state.requests_used = 0
 
-if RUNNING_ON_STREAMLIT:
-    providers = ["Gemini", "Groq"]
-else:
-    providers = ["Lokaal", "Gemini", "Groq"]
-
 st.title("Eva — Vraag & Antwoord (modulaire versie)")
 
 with st.sidebar:
@@ -171,14 +163,14 @@ with st.sidebar:
             "Maximum tokens per sessie",
             min_value=1000,
             max_value=1000000,
-            value=200000,
+            value=50000,
             step=1000
         )
 
         st.session_state.request_limit = st.number_input(
             "Maximum aantal requests",
             min_value=1,
-            max_value=10000,
+            max_value=1000,
             value=100
         )
 
@@ -203,9 +195,9 @@ with st.sidebar:
 
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
-        ["Lokaal", "Gemini", "Groq"],
-        index=0
-    )
+        ["Gemini", "Groq". "Lokaal"],
+        index=0)
+    st.write("Lokaal niet beschikbaar via streamlit/internet")
 
     if st.session_state["ai_provider"] == "Lokaal":
         st.session_state.model_name = st.selectbox(
