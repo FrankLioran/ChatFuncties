@@ -16,7 +16,6 @@ from documents import (
 )
 
 from image import (
-    start_comfyui,
     generate_pollinations,
     generate_pollinations_styled, 
     save_pollinations_image,
@@ -82,9 +81,9 @@ st.title("🎨 Eva — Beeldbewerking, beeldgeneratie")
 # ComfyUI en Paintnet starten, afbeelding uploaden
 # ---------------------------------------------------------
 
-st.header("ComfyUI starten")
-if st.button("Start ComfyUI"):
-    st.success(start_comfyui())
+#st.header("ComfyUI starten")
+#if st.button("Start ComfyUI"):
+#    st.success(start_comfyui())
  
 st.header("🎨 Paint.NET openen")
 if st.button("Start Paint.NET"):
