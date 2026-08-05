@@ -58,12 +58,12 @@ with col_center:
     use_ai_summary = st.checkbox("🧠 AI-Synthese inschakelen", value=True)
 
     eva_img = BASE_DIR / "images" / "Eva.jpg"
-        if eva_img.exists():
-            st.image(str(eva_img), caption="Eva", use_container_width=False)
-        else:
-            st.info("✨ Eva Research Assistant")
+    if eva_img.exists():
+        st.image(str(eva_img), caption="Eva", use_container_width=False)
+    else:
+        st.info("✨ Eva Research Assistant")
 
-        st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
+    st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
 
 # -----------------------------
 # 2. Zoek-Engine Module (De "Workers")
