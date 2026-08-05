@@ -261,12 +261,6 @@ if "zoek_query" in st.session_state and "config" in st.session_state:
 
     # --- AI SYNTHESIS (The Orchestrator) ---
     with col_right:
-
-        eva_img = BASE_DIR / "images" / "Eva.jpg"
-        if eva_img.exists():
-            st.image(str(eva_img), caption="Eva", use_container_width=True)
-        else:
-            st.info("✨ Eva Research Assistant")
         
         st.markdown("### 🧠 AI-Synthese")
         if cfg.get("ai"):
@@ -305,4 +299,10 @@ if "zoek_query" in st.session_state and "config" in st.session_state:
             st.write("AI-synthese uitgeschakeld.")
 else:
     with col_center:
-        st.info("💡 Kies je bronnen aan de linkerkant en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
+        eva_img = BASE_DIR / "images" / "Eva.jpg"
+        if eva_img.exists():
+            st.image(str(eva_img), caption="Eva", use_container_width=True)
+        else:
+            st.info("✨ Eva Research Assistant")
+
+        st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
