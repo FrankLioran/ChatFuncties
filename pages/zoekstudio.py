@@ -18,14 +18,17 @@ col_left, col_center, col_right = st.columns([1, 2, 1])
 with col_left:
     st.markdown("### ⚙️ Instellingen")
 
-    # Veilig de afbeelding laden als deze op GitHub staat
-    eva_img = Path("Eva.jpg")
+    # Pad opbouwen naar images/Eva.jpg in de hoofdmap
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    eva_img = BASE_DIR / "images" / "Eva.jpg"
+
     if eva_img.exists():
         st.image(str(eva_img), caption="Eva", use_container_width=True)
     else:
         st.info("✨ Eva Zoekassistent")
 
     st.markdown("**Zoekmachines**")
+
     use_wikipedia = st.checkbox("Wikipedia", value=True)
     use_duckduckgo = st.checkbox("DuckDuckGo (web)", value=True)
     use_news = st.checkbox("News (voorbeeld)", value=False)
