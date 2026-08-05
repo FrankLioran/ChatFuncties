@@ -32,7 +32,7 @@ if st.button("🚀 Start Onderzoek", use_container_width=True):
         "ai": use_ai_summary
     }
 
-col_center, col_right = st.columns([2, 1])
+col_center, col_right = st.columns([1, 1])
 
 with col_center:
     st.markdown("### ⚙️ Bronnen selecteren")
