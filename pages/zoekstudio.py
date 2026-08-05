@@ -63,7 +63,7 @@ with col_center:
         else:
             st.info("✨ Eva Research Assistant")
 
-    st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
+        st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
 
 # -----------------------------
 # 2. Zoek-Engine Module (De "Workers")
