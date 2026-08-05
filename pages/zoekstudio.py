@@ -13,7 +13,7 @@ st.title("🔎 Eva — Geavanceerde Zoekstudio")
 
 query = st.text_input("Zoekopdracht", value="quantum computing basics")
 
-col_left, col_center = st.columns([1, 3])
+col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
     st.markdown("### ⚙️ Instellingen")
