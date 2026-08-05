@@ -302,6 +302,26 @@ with st.sidebar:
     if st.button("Genereer afbeelding via Pollinations"):
         with st.spinner("Afbeelding wordt gegenereerd in de cloud..."):
             path = generate_and_save_image(image_prompt)
+            if path and Path(path).exists():
+                # We lezen de afbeelding in als bytes
+                with open(path, "rb") as f:
+                    img_bytes = f.read()
+
+                # We voegen de afbeelding toe aan de chatgeschiedenis!
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"🎨 Afbeelding gegenereerd voor: *'{image_prompt}'*",
+                    "image_bytes": img_bytes
+                })
+
+                # Herlaad direct zodat de afbeelding in het gesprek verschijnt
+                st.rerun()
+            else:
+                st.error("Het genereren van de afbeelding is mislukt.")
+    
+    if st.button("Genereer afbeelding via Pollinations"):
+        with st.spinner("Afbeelding wordt gegenereerd in de cloud..."):
+            path = generate_and_save_image(image_prompt)
             if path:
                 st.success(f"Afbeelding opgeslagen: {path}")
                 st.image(str(path))
@@ -422,11 +442,20 @@ if user_input:
     st.rerun()  # Schone herstart zodat de weergave-loop alles direct perfect rendert
 
 # De weergave-loop die de hele geschiedenis netjes opbouwt
-for m in st.session_state.messages:
+for idx, m in enumerate(st.session_state.messages):
     with st.chat_message(m["role"]):
         # We controleren simpelweg of dit bericht een afbeelding bevat
         if "image_bytes" in m:
             st.image(m["image_bytes"])
+
+            # ✅ DE DOWNLOADKNOP DIRECT ONDER DE AFBEELDING:
+            st.download_button(
+                label="📥 Download deze afbeelding",
+                data=m["image_bytes"],
+                file_name=f"eva_creatie_{idx}.png",
+                mime="image/png",
+                key=f"download_btn_{idx}"
+            )
         else:
             st.write(m["content"])
 
