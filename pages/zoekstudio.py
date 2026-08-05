@@ -22,7 +22,14 @@ st.markdown("*Geavanceerde analyse door bronnen te combineren en ruis te filtere
 # 1. Instellingen & Categorisering
 # -----------------------------
 
+eva_img = BASE_DIR / "images" / "Eva.jpg"
+if eva_img.exists():
+    st.image(str(eva_img), caption="Eva", use_container_width=False)
+else:
+    st.info("✨ Eva Research Assistant")
+
 query = st.text_input("Wat wil je onderzoeken?", value="quantum computing basics")
+st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
 if st.button("🚀 Start Onderzoek", use_container_width=True):
     st.session_state["zoek_query"] = query
     st.session_state["config"] = {
@@ -56,14 +63,6 @@ with col_center:
 
     st.markdown("---")
     use_ai_summary = st.checkbox("🧠 AI-Synthese inschakelen", value=True)
-
-    eva_img = BASE_DIR / "images" / "Eva.jpg"
-    if eva_img.exists():
-        st.image(str(eva_img), caption="Eva", use_container_width=False)
-    else:
-        st.info("✨ Eva Research Assistant")
-
-    st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
 
 # -----------------------------
 # 2. Zoek-Engine Module (De "Workers")
