@@ -27,14 +27,14 @@ query = st.text_input("Wat wil je onderzoeken?", value="quantum computing basics
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
-    st.markdown("### ⚙️ Bronnen selecteren")
-
     eva_img = BASE_DIR / "images" / "Eva.jpg"
     if eva_img.exists():
         st.image(str(eva_img), caption="Eva", use_container_width=True)
     else:
         st.info("✨ Eva Research Assistant")
 
+with col_center:
+    st.markdown("### ⚙️ Bronnen selecteren")
     with st.expander("🌐 Algemene Kennis", expanded=True):
         use_wikipedia = st.checkbox("Wikipedia", value=True)
         use_duckduckgo = st.checkbox("DuckDuckGo (Web)", value=True)
