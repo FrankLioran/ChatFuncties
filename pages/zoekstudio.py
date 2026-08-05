@@ -122,6 +122,33 @@ class SearchEngine:
         except: return None
 
     @staticmethod
+    def pubmed(q):
+        try:
+            search_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={requests.utils.quote(q)}&retmode=json&retmax=2"
+            r_search = requests.get(search_url, timeout=5).json()
+            ids = r_search.get("esearchresult", {}).get("idlist", [])
+            if not ids: return None
+
+            id_str = ",".join(ids)
+            fetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id_str}&retmode=xml"
+            r_fetch = requests.get(fetch_url, timeout=5)
+            root = ET.fromstring(r_fetch.text)
+
+            results = []
+            for i, article in enumerate(root.findall(".//PubmedArticle")):
+                title = article.find(".//ArticleTitle").text if article.find(".//ArticleTitle") is not None else "Geen titel"
+                abstract_elem = article.find(".//AbstractText")
+                abstract = abstract_elem.text[:250] + "..." if abstract_elem is not None and abstract_elem.text else "Geen samenvatting beschikbaar."
+                results.append({
+                    "source": "PubMed", 
+                    "text": f"{title}: {abstract}", 
+                    "url": f"https://pubmed.ncbi.nlm.nih.gov/{ids[i]}" if i < len(ids) else "https://pubmed.ncbi.nlm.nih.gov/", 
+                    "conf": 0.95
+                })
+            return results if results else None
+        except: return None
+
+    @staticmethod
     def openalex(q):
         try:
             url = f"https://api.openalex.org/works?search={requests.utils.quote(q)}&per_page=2"
@@ -129,8 +156,27 @@ class SearchEngine:
             results = []
             for work in r.get("results", []):
                 title = work.get("display_name")
-                summary = work.get("abstract_inverted_index") # OpenAlex uses inverted index, simplified for now
                 results.append({"source": "OpenAlex", "text": f"Work: {title}", "url": work.get("id"), "conf": 0.9})
+            return results if results else None
+        except: return None
+
+    @staticmethod
+    def crossref(q):
+        try:
+            url = f"https://api.crossref.org/works?query={requests.utils.quote(q)}&rows=2"
+            r = requests.get(url, headers={"User-Agent": "EvaAssistant/1.0 (mailto:frank@example.com)"}, timeout=5).json()
+            items = r.get("message", {}).get("items", [])
+            results = []
+            for item in items:
+                title = item.get("title", ["Geen titel"])[0]
+                doi = item.get("DOI", "")
+                publisher = item.get("publisher", "Onbekend")
+                results.append({
+                    "source": "CrossRef",
+                    "text": f"Paper: {title} (Uitgever: {publisher})",
+                    "url": f"https://doi.org/{doi}" if doi else None,
+                    "conf": 0.90
+                })
             return results if results else None
         except: return None
 
@@ -158,10 +204,12 @@ class SearchEngine:
         except: return None
 
 # -----------------------------
-# 3. Orchestration & Display
+# 3. Orchestration & Display (Veilige controle)
 # -----------------------------
 
-if "zoek_query" in st.session_state:
+# We controleren nu of BEIDE sleutels in de session_state aanwezig zijn.
+# Dit voorkomt KeyErrors bij updates of herstarts!
+if "zoek_query" in st.session_state and "config" in st.session_state:
     q = st.session_state["zoek_query"]
     cfg = st.session_state["config"]
     all_results = []
@@ -170,31 +218,39 @@ if "zoek_query" in st.session_state:
         st.markdown(f"### 🔍 Onderzoeksvooruitgang voor: `{q}`")
 
         # --- EXECUTION ---
-        if cfg["wikipedia"]:
+        if cfg.get("wikipedia"):
             res = SearchEngine.wikipedia(q)
             if res: all_results.append(res)
 
-        if cfg["duckduckgo"]:
+        if cfg.get("duckduckgo"):
             res = SearchEngine.duckduckgo(q)
             if res: all_results.extend(res)
 
-        if cfg["wikidata"]:
+        if cfg.get("wikidata"):
             res = SearchEngine.wikidata(q)
             if res: all_results.append(res)
 
-        if cfg["arxiv"]:
+        if cfg.get("arxiv"):
             res = SearchEngine.arxiv(q)
             if res: all_results.extend(res)
 
-        if cfg["openalex"]:
+        if cfg.get("pubmed"):
+            res = SearchEngine.pubmed(q)
+            if res: all_results.extend(res)
+
+        if cfg.get("openalex"):
             res = SearchEngine.openalex(q)
             if res: all_results.extend(res)
 
-        if cfg["github"]:
+        if cfg.get("crossref"):
+            res = SearchEngine.crossref(q)
+            if res: all_results.extend(res)
+
+        if cfg.get("github"):
             res = SearchEngine.github(q)
             if res: all_results.extend(res)
 
-        if cfg["openlibrary"]:
+        if cfg.get("openlibrary"):
             res = SearchEngine.openlibrary(q)
             if res: all_results.extend(res)
 
@@ -204,7 +260,6 @@ if "zoek_query" in st.session_state:
         else:
             for item in all_results:
                 with st.container():
-                    # Visual feedback for confidence
                     color = "green" if item["conf"] >= 0.9 else "orange" if item["conf"] >= 0.7 else "red"
                     st.markdown(f"**[{item['source']}]** :{color}[Confidence: {int(item['conf']*100)}%]")
                     st.write(item["text"])
@@ -215,10 +270,9 @@ if "zoek_query" in st.session_state:
     # --- AI SYNTHESIS (The Orchestrator) ---
     with col_right:
         st.markdown("### 🧠 AI-Synthese")
-        if cfg["ai"]:
+        if cfg.get("ai"):
             if all_results:
                 with st.spinner("Eva analyseert en filtert de data..."):
-                    # We geven de AI de gestructureerde data (bron + tekst + confidence)
                     context_payload = ""
                     for r in all_results:
                         context_payload += f"SOURCE: {r['source']} (CONFIDENCE: {r['conf']})\nCONTENT: {r['text']}\n\n"
@@ -250,3 +304,6 @@ if "zoek_query" in st.session_state:
                 st.write("Geen data om te synthetiseren.")
         else:
             st.write("AI-synthese uitgeschakeld.")
+else:
+    with col_center:
+        st.info("💡 Kies je bronnen aan de linkerkant en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
