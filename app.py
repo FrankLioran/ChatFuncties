@@ -318,15 +318,6 @@ with st.sidebar:
                 st.rerun()
             else:
                 st.error("Het genereren van de afbeelding is mislukt.")
-    
-    if st.button("Genereer afbeelding via Pollinations"):
-        with st.spinner("Afbeelding wordt gegenereerd in de cloud..."):
-            path = generate_and_save_image(image_prompt)
-            if path:
-                st.success(f"Afbeelding opgeslagen: {path}")
-                st.image(str(path))
-            else:
-                st.error("Het genereren van de afbeelding is mislukt.")
 
     st.header("Spraak")
     if st.button("Luister naar spraak"):
