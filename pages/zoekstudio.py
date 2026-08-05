@@ -27,12 +27,6 @@ query = st.text_input("Wat wil je onderzoeken?", value="quantum computing basics
 col_center, col_right = st.columns([2, 1])
 
 with col_center:
-    eva_img = BASE_DIR / "images" / "Eva.jpg"
-    if eva_img.exists():
-        st.image(str(eva_img), caption="Eva", use_container_width=True)
-    else:
-        st.info("✨ Eva Research Assistant")
-        
     st.markdown("### ⚙️ Bronnen selecteren")
     with st.expander("🌐 Algemene Kennis", expanded=True):
         use_wikipedia = st.checkbox("Wikipedia", value=True)
@@ -268,6 +262,13 @@ if "zoek_query" in st.session_state and "config" in st.session_state:
 
     # --- AI SYNTHESIS (The Orchestrator) ---
     with col_right:
+
+        eva_img = BASE_DIR / "images" / "Eva.jpg"
+        if eva_img.exists():
+            st.image(str(eva_img), caption="Eva", use_container_width=True)
+        else:
+            st.info("✨ Eva Research Assistant")
+        
         st.markdown("### 🧠 AI-Synthese")
         if cfg.get("ai"):
             if all_results:
