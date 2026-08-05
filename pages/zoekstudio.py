@@ -1,6 +1,7 @@
+# pages/zoekstudio.py
 import streamlit as st
 import requests
-import json
+from pathlib import Path
 
 st.set_page_config(page_title="Eva — Zoekstudio", layout="wide")
 
@@ -10,14 +11,19 @@ st.title("🔎 Eva — Geavanceerde Zoekstudio")
 # 1. Zoekbalk + basisinstellingen
 # -----------------------------
 
-query = st.text_input("Zoekopdracht", "quantum computing basics")
+query = st.text_input("Zoekopdracht", value="quantum computing basics")
 
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
     st.markdown("### ⚙️ Instellingen")
 
-    st.image("Eva.jpg", caption="Eva", use_column_width=True)
+    # Veilig de afbeelding laden als deze op GitHub staat
+    eva_img = Path("Eva.jpg")
+    if eva_img.exists():
+        st.image(str(eva_img), caption="Eva", use_container_width=True)
+    else:
+        st.info("✨ Eva Zoekassistent")
 
     st.markdown("**Zoekmachines**")
     use_wikipedia = st.checkbox("Wikipedia", value=True)
@@ -27,7 +33,7 @@ with col_left:
     st.markdown("**AI‑samenvatting**")
     use_ai_summary = st.checkbox("AI‑samenvatting inschakelen", value=True)
 
-    if st.button("🚀 Start zoekopdracht"):
+    if st.button("🚀 Start zoekopdracht", use_container_width=True):
         st.session_state["zoek_query"] = query
         st.session_state["zoek_use_wikipedia"] = use_wikipedia
         st.session_state["zoek_use_duckduckgo"] = use_duckduckgo
@@ -44,7 +50,7 @@ def search_wikipedia(q: str):
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{q.replace(' ', '_')}"
         r = requests.get(url, timeout=5)
         if r.status_code != 200:
-            return {"engine": "Wikipedia", "ok": False, "error": f"Status {r.status_code}"}
+            return {"engine": "Wikipedia", "ok": False, "error": f"Geen directe pagina gevonden (Status {r.status_code})"}
         data = r.json()
         return {
             "engine": "Wikipedia",
@@ -57,7 +63,7 @@ def search_wikipedia(q: str):
         return {"engine": "Wikipedia", "ok": False, "error": str(e)}
 
 def search_duckduckgo(q: str):
-    """DuckDuckGo Instant Answer API (geen volledige websearch, maar info/snippets)."""
+    """DuckDuckGo Instant Answer API (info/snippets)."""
     try:
         url = "https://api.duckduckgo.com"
         params = {"q": q, "format": "json", "no_redirect": 1, "no_html": 1}
@@ -76,34 +82,32 @@ def search_duckduckgo(q: str):
         return {"engine": "DuckDuckGo", "ok": False, "error": str(e)}
 
 def search_news_example(q: str):
-    """Placeholder voor een nieuws‑API (bijv. NewsAPI)."""
-    # Hier zou je een echte API aanroepen met een API‑key.
+    """Placeholder voor nieuws‑API."""
     return {
         "engine": "NewsAPI (voorbeeld)",
         "ok": True,
         "articles": [
-            {"title": f"Nieuws over: {q}", "source": "Demo", "url": "https://example.com"}
+            {"title": f"Nieuws over: {q}", "source": "Demo Bron", "url": "https://example.com"}
         ]
     }
 
 def build_ai_summary(results: list):
-    """Eenvoudige tekstuele samenvatting zonder externe AI (placeholder)."""
-    # Hier kun je jouw eigen AI‑model aanroepen (Gemini, Gemma, etc.)
-    # Voor nu: simpele samengestelde tekst.
+    """Eenvoudige gecombineerde samenvatting van zoekresultaten."""
     lines = []
     for r in results:
         if not r.get("ok"):
             continue
         engine = r.get("engine")
-        if engine == "Wikipedia":
-            lines.append(f"📚 Wikipedia zegt: {r.get('extract', '')[:300]}...")
-        elif engine == "DuckDuckGo":
-            lines.append(f"🦆 DuckDuckGo heading: {r.get('heading', '')}")
+        if engine == "Wikipedia" and r.get("extract"):
+            lines.append(f"📚 **Wikipedia:** {r.get('extract')}")
+        elif engine == "DuckDuckGo" and r.get("abstract"):
+            lines.append(f"🦆 **DuckDuckGo:** {r.get('abstract')}")
         elif engine.startswith("NewsAPI"):
             titles = [a["title"] for a in r.get("articles", [])]
-            lines.append(f"📰 Nieuwsartikelen: " + "; ".join(titles))
+            lines.append(f"📰 **Nieuws:** " + "; ".join(titles))
+
     if not lines:
-        return "Geen bruikbare resultaten om samen te vatten."
+        return "Geen directe beknopte samenvatting beschikbaar voor deze zoekopdracht."
     return "\n\n".join(lines)
 
 # -----------------------------
@@ -112,7 +116,6 @@ def build_ai_summary(results: list):
 
 if "zoek_query" in st.session_state and st.session_state["zoek_query"]:
     q = st.session_state["zoek_query"]
-
     results = []
 
     with col_center:
@@ -123,36 +126,40 @@ if "zoek_query" in st.session_state and st.session_state["zoek_query"]:
             results.append(res_wiki)
             st.markdown("#### 📚 Wikipedia")
             if res_wiki["ok"]:
-                st.write(f"**Titel:** {res_wiki.get('title')}")
+                st.write(f"**{res_wiki.get('title')}**")
                 st.write(res_wiki.get("extract"))
                 if res_wiki.get("url"):
-                    st.write(f"[Open pagina]({res_wiki['url']})")
+                    st.markdown(f"[🔗 Open volledige Wikipedia pagina]({res_wiki['url']})")
             else:
-                st.error(f"Fout bij Wikipedia: {res_wiki.get('error')}")
+                st.warning(res_wiki.get("error"))
 
         if st.session_state.get("zoek_use_duckduckgo"):
             res_ddg = search_duckduckgo(q)
             results.append(res_ddg)
             st.markdown("#### 🦆 DuckDuckGo")
             if res_ddg["ok"]:
-                st.write(f"**Heading:** {res_ddg.get('heading')}")
-                st.write(res_ddg.get("abstract"))
+                if res_ddg.get("abstract"):
+                    st.write(res_ddg.get("abstract"))
+                else:
+                    st.write("*Geen direct antwoord-snippet beschikbaar.*")
+
                 rt = res_ddg.get("related_topics", [])
                 if rt:
-                    st.markdown("**Gerelateerde onderwerpen:**")
-                    for item in rt[:5]:
-                        txt = item.get("Text") or str(item)
-                        st.write(f"- {txt}")
+                    with st.expander("Gerelateerde onderwerpen"):
+                        for item in rt[:5]:
+                            txt = item.get("Text") if isinstance(item, dict) else str(item)
+                            if txt:
+                                st.write(f"- {txt}")
             else:
                 st.error(f"Fout bij DuckDuckGo: {res_ddg.get('error')}")
 
         if st.session_state.get("zoek_use_news"):
             res_news = search_news_example(q)
             results.append(res_news)
-            st.markdown("#### 📰 Nieuws (voorbeeld)")
+            st.markdown("#### 📰 Nieuws")
             if res_news["ok"]:
                 for art in res_news.get("articles", []):
-                    st.write(f"- **{art['title']}** ({art['source']}) — {art['url']}")
+                    st.write(f"- **{art['title']}** ({art['source']})")
             else:
                 st.error("Fout bij nieuwszoekopdracht.")
 
@@ -160,6 +167,6 @@ if "zoek_query" in st.session_state and st.session_state["zoek_query"]:
         st.markdown("### 🧠 AI‑samenvatting")
         if st.session_state.get("zoek_use_ai"):
             summary = build_ai_summary(results)
-            st.write(summary)
+            st.info(summary)
         else:
-            st.info("AI‑samenvatting is uitgeschakeld.")
+            st.write("AI‑samenvatting is uitgeschakeld.")
