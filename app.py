@@ -91,7 +91,7 @@ if "request_limit" not in st.session_state:
 if "requests_used" not in st.session_state:
     st.session_state.requests_used = 0
 
-st.title("Eva — Vraag & Antwoord (modulaire versie)")
+st.title("Eva — Vraag & Antwoord")
 
 with st.sidebar:
     st.image(str(get_persona_image()), width=220)
