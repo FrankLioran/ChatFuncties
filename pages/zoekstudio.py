@@ -57,6 +57,14 @@ with col_center:
     st.markdown("---")
     use_ai_summary = st.checkbox("🧠 AI-Synthese inschakelen", value=True)
 
+    eva_img = BASE_DIR / "images" / "Eva.jpg"
+        if eva_img.exists():
+            st.image(str(eva_img), caption="Eva", use_container_width=False)
+        else:
+            st.info("✨ Eva Research Assistant")
+
+    st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
+
 # -----------------------------
 # 2. Zoek-Engine Module (De "Workers")
 # -----------------------------
@@ -297,12 +305,4 @@ if "zoek_query" in st.session_state and "config" in st.session_state:
                 st.write("Geen data om te synthetiseren.")
         else:
             st.write("AI-synthese uitgeschakeld.")
-else:
-    with col_center:
-        eva_img = BASE_DIR / "images" / "Eva.jpg"
-        if eva_img.exists():
-            st.image(str(eva_img), caption="Eva", use_container_width=True)
-        else:
-            st.info("✨ Eva Research Assistant")
 
-        st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
