@@ -13,7 +13,7 @@ st.title("🔎 Eva — Geavanceerde Zoekstudio")
 
 query = st.text_input("Zoekopdracht", value="quantum computing basics")
 
-col_left, col_center, col_right = st.columns([1, 2, 1])
+col_left, col_center = st.columns([1, 3])
 
 with col_left:
     st.markdown("### ⚙️ Instellingen")
@@ -27,6 +27,7 @@ with col_left:
     else:
         st.info("✨ Eva Zoekassistent")
 
+with col_center: 
     st.markdown("**Zoekmachines**")
 
     use_wikipedia = st.checkbox("Wikipedia", value=True)
