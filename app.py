@@ -123,22 +123,22 @@ with st.sidebar:
 
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
-        ["Lokaal (installeer eerst ollama en importeer de modellen)", "Gemini", "Groq"],
+        ["Gemini", "Groq"],
         index=0
     )
 
-    if st.session_state["ai_provider"] == "Lokaal (installeer eerst ollama en importeer de modellen)":
-        st.session_state.model_name = st.selectbox(
-            "Modelnaam",
-            [
-                "llama3.2:3b",
-                "gemma3:1b",
-                "gemma3:4b",
-                "gemma2:9B",
-                "qwen2.5:3b"
-            ],
-            index=0
-        )
+#    if st.session_state["ai_provider"] == "Lokaal":
+#        st.session_state.model_name = st.selectbox(
+#            "Modelnaam",
+#            [
+#                "llama3.2:3b",
+#                "gemma3:1b",
+#                "gemma3:4b",
+#                "gemma2:9B",
+#                "qwen2.5:3b"
+#            ],
+#            index=0
+#        )
 
     if st.session_state["ai_provider"] == "Gemini":
         st.session_state.model_name = st.selectbox(
