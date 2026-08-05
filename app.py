@@ -112,7 +112,59 @@ with st.sidebar:
         # Modelinstellingen
     st.header("Modelinstellingen")
 
+    st.session_state.temperature = st.slider(
+        "Temperature",
+        0.0,
+        1.5,
+        st.session_state.temperature
+    )
+
     st.header("AI Provider")
+
+    st.session_state["ai_provider"] = st.selectbox(
+        "Kies een AI-provider",
+        ["Lokaal (installeer eerst ollama en importeer de modellen)", "Gemini", "Groq"],
+        index=0
+    )
+
+    if st.session_state["ai_provider"] == "Lokaal (installeer eerst ollama en importeer de modellen)":
+        st.session_state.model_name = st.selectbox(
+            "Modelnaam",
+            [
+                "llama3.2:3b",
+                "gemma3:1b",
+                "gemma3:4b",
+                "gemma2:9B",
+                "qwen2.5:3b"
+            ],
+            index=0
+        )
+
+    if st.session_state["ai_provider"] == "Gemini":
+        st.session_state.model_name = st.selectbox(
+            "Modelnaam",
+            [
+                "gemini-2.5-flash-lite",
+                "gemini-3.5-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-3.6-flash",
+                "gemini-3.1-flash-lite",
+                "gemma-4-31b-it",
+                "gemma-4-26b-a4b-it"
+            ],
+            index=0
+        )
+
+    if st.session_state["ai_provider"] == "Groq":
+        st.session_state.model_name = st.selectbox(
+            "Modelnaam",
+            [
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.6-27b",
+            ],
+            index=0
+        )
 
     st.subheader("🔑 API Keys")
 
@@ -120,6 +172,7 @@ with st.sidebar:
         st.markdown("""
     Deze applicatie gebruikt **uw eigen API-key**.
 
+    - HET SCRIPT KAN FOUTEN BEVATTEN. Gebruik bij voorkeur een gratis API account of beperk bij uw provicer de kosten.
     - De sleutel wordt uitsluitend gebruikt om verzoeken naar de gekozen AI-provider te sturen.
     - Het script slaat de sleutel niet permanent op.
     - De sleutel wordt door ons niet gelogd.
@@ -163,14 +216,14 @@ with st.sidebar:
             "Maximum tokens per sessie",
             min_value=1000,
             max_value=1000000,
-            value=50000,
+            value=200000,
             step=1000
         )
 
         st.session_state.request_limit = st.number_input(
             "Maximum aantal requests",
             min_value=1,
-            max_value=1000,
+            max_value=10000,
             value=100
         )
 
@@ -192,51 +245,6 @@ with st.sidebar:
     st.caption(
         f"Gebruikte tokens: {st.session_state.tokens_used:,}"
     )
-
-    st.session_state["ai_provider"] = st.selectbox(
-        "Kies een AI-provider",
-        ["Groq", "Gemini", "Lokaal"],
-        index=0)
-    st.write("Lokaal niet beschikbaar via streamlit/internet")
-
-    if st.session_state["ai_provider"] == "Groq":
-        st.session_state.model_name = st.selectbox(
-            "Modelnaam",
-            [
-                "openai/gpt-oss-120b",
-                "openai/gpt-oss-20b",
-                "qwen/qwen3.6-27b",
-            ],
-            index=0
-        )
-        
-    if st.session_state["ai_provider"] == "Gemini":
-        st.session_state.model_name = st.selectbox(
-            "Modelnaam",
-            [
-                "gemini-2.5-flash-lite",
-                "gemini-3.5-flash",
-                "gemini-3.5-flash-lite",
-                "gemini-3.6-flash",
-                "gemini-3.1-flash-lite",
-                "gemma-4-31b-it",
-                "gemma-4-26b-a4b-it"
-            ],
-            index=0
-        )
-        
-    if st.session_state["ai_provider"] == "Lokaal":
-        st.session_state.model_name = st.selectbox(
-            "Modelnaam",
-            [
-                "llama3.2:3b",
-                "gemma3:1b",
-                "gemma3:4b",
-                "gemma2:9B",
-                "qwen2.5:3b"
-            ],
-            index=0
-        )
 
     # ---------------------------------------------------------
     # Document upload
@@ -331,13 +339,6 @@ with st.sidebar:
         st.info("Nog geen retrieval uitgevoerd.")
     
     st.write(f"**Actief model:** {st.session_state.get('debug_active_model', 'onbekend')}")
-
-    st.session_state.temperature = st.slider(
-        "Temperature",
-        0.0,
-        1.5,
-        st.session_state.temperature
-    )
 
     # Reset & save
     st.sidebar.markdown("---")
