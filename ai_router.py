@@ -21,7 +21,7 @@ def debug_provider(provider, model, messages):
 
 def ask_ai(messages):
 
-    provider = st.session_state.get("ai_provider", "Lokaal")
+    provider = st.session_state.get("ai_provider", "Lokaal (installeer eerst ollama en importeer de modellen)")
 
     model = st.session_state.get("model_name")
 
