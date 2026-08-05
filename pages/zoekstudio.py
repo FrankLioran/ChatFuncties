@@ -24,16 +24,15 @@ st.markdown("*Geavanceerde analyse door bronnen te combineren en ruis te filtere
 
 query = st.text_input("Wat wil je onderzoeken?", value="quantum computing basics")
 
-col_left, col_center, col_right = st.columns([1, 2, 1])
+col_center, col_right = st.columns([2, 1])
 
-with col_left:
+with col_center:
     eva_img = BASE_DIR / "images" / "Eva.jpg"
     if eva_img.exists():
         st.image(str(eva_img), caption="Eva", use_container_width=True)
     else:
         st.info("✨ Eva Research Assistant")
-
-with col_center:
+        
     st.markdown("### ⚙️ Bronnen selecteren")
     with st.expander("🌐 Algemene Kennis", expanded=True):
         use_wikipedia = st.checkbox("Wikipedia", value=True)
