@@ -21,12 +21,12 @@ st.markdown("*Geavanceerde analyse door bronnen te combineren en ruis te filtere
 # -----------------------------
 # 1. Instellingen & Categorisering
 # -----------------------------
-
-eva_img = BASE_DIR / "images" / "Eva.jpg"
-if eva_img.exists():
-    st.image(str(eva_img), caption="Eva", use_container_width=False)
-else:
-    st.info("✨ Eva Research Assistant")
+with st.sidebar:
+    eva_img = BASE_DIR / "images" / "Eva.jpg"
+    if eva_img.exists():
+        st.image(str(eva_img), caption="Eva", use_container_width=False)
+    else:
+        st.info("✨ Eva Research Assistant")
 
 query = st.text_input("Wat wil je onderzoeken?", value="quantum computing basics")
 st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
