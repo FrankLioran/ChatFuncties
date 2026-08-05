@@ -15,12 +15,6 @@ from ai_router import ask_ai
 
 st.set_page_config(page_title="Eva — Research Orchestrator", layout="wide")
 
-st.title("🔎 Eva — AI Research Orchestrator")
-st.markdown("*Geavanceerde analyse door bronnen te combineren en ruis te filteren.*")
-
-# -----------------------------
-# 1. Instellingen & Categorisering
-# -----------------------------
 with st.sidebar:
     eva_img = BASE_DIR / "images" / "Eva.jpg"
     if eva_img.exists():
@@ -28,6 +22,12 @@ with st.sidebar:
     else:
         st.info("✨ Eva Research Assistant")
 
+st.title("🔎 Eva — AI Research Orchestrator")
+st.markdown("*Geavanceerde analyse door bronnen te combineren en ruis te filteren.*")
+
+# -----------------------------
+# 1. Instellingen & Categorisering
+# -----------------------------
 query = st.text_input("Wat wil je onderzoeken?", value="quantum computing basics")
 st.info("💡 Kies je bronnen en klik op **🚀 Start Onderzoek** om de Orchestrator te activeren!")
 if st.button("🚀 Start Onderzoek", use_container_width=True):
