@@ -309,7 +309,7 @@ with st.sidebar:
 
                 # We voegen de afbeelding toe aan de chatgeschiedenis!
                 st.session_state.messages.append({
-                    "role": "assistant",
+                    "role": "image",
                     "content": f"🎨 Afbeelding gegenereerd voor: *'{image_prompt}'*",
                     "image_bytes": img_bytes
                 })
@@ -434,20 +434,23 @@ if user_input:
 
 # De weergave-loop die de hele geschiedenis netjes opbouwt
 for idx, m in enumerate(st.session_state.messages):
-    with st.chat_message(m["role"]):
-        # We controleren simpelweg of dit bericht een afbeelding bevat
-        if "image_bytes" in m:
-            st.image(m["image_bytes"])
 
-            # ✅ DE DOWNLOADKNOP DIRECT ONDER DE AFBEELDING:
-            st.download_button(
-                label="📥 Download deze afbeelding",
-                data=m["image_bytes"],
-                file_name=f"eva_creatie_{idx}.png",
-                mime="image/png",
-                key=f"download_btn_{idx}"
-            )
-        else:
+    if m["role"] == "image":
+
+        st.markdown(m["content"])
+        st.image(m["image_bytes"])
+
+        st.download_button(
+            label="📥 Download deze afbeelding",
+            data=m["image_bytes"],
+            file_name=f"eva_creatie_{idx}.png",
+            mime="image/png",
+            key=f"download_btn_{idx}"
+        )
+
+    else:
+
+        with st.chat_message(m["role"]):
             st.write(m["content"])
 
 # --- Footer ---
