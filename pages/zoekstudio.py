@@ -23,6 +23,14 @@ st.markdown("*Geavanceerde analyse door bronnen te combineren en ruis te filtere
 # -----------------------------
 
 query = st.text_input("Wat wil je onderzoeken?", value="quantum computing basics")
+if st.button("🚀 Start Onderzoek", use_container_width=True):
+    st.session_state["zoek_query"] = query
+    st.session_state["config"] = {
+        "wikipedia": use_wikipedia, "duckduckgo": use_duckduckgo, "wikidata": use_wikidata,
+        "arxiv": use_arxiv, "pubmed": use_pubmed, "openalex": use_openalex, "crossref": use_crossref,
+        "github": use_github, "hackernews": use_hackernews, "openlibrary": use_openlibrary,
+        "ai": use_ai_summary
+    }
 
 col_center, col_right = st.columns([2, 1])
 
@@ -48,15 +56,6 @@ with col_center:
 
     st.markdown("---")
     use_ai_summary = st.checkbox("🧠 AI-Synthese inschakelen", value=True)
-
-    if st.button("🚀 Start Onderzoek", use_container_width=True):
-        st.session_state["zoek_query"] = query
-        st.session_state["config"] = {
-            "wikipedia": use_wikipedia, "duckduckgo": use_duckduckgo, "wikidata": use_wikidata,
-            "arxiv": use_arxiv, "pubmed": use_pubmed, "openalex": use_openalex, "crossref": use_crossref,
-            "github": use_github, "hackernews": use_hackernews, "openlibrary": use_openlibrary,
-            "ai": use_ai_summary
-        }
 
 # -----------------------------
 # 2. Zoek-Engine Module (De "Workers")
