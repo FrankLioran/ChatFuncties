@@ -267,7 +267,7 @@ def answer_question(
 
     #for i, m in enumerate(messages):
     #    print(f"\n[{i}] {m['role']}")
-    #    print(m["content"][:300])
+    #    print(m["content"][:30])
 
     #print("=" * 80)
 
