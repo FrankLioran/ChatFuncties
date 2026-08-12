@@ -1,35 +1,25 @@
-# chat.py
-import logging
 import json
+import logging
 from pathlib import Path
+from typing import List, Dict, Any
 
-import streamlit as st
 import requests
+import streamlit as st
 
-from documents import retrieve_context
 from ai_router import ask_ai
+from documents import retrieve_context
 from safety import check_limits
 
-#from config import (
-#    DEFAULT_MODEL_NAME,
-#    DEFAULT_TEMPERATURE,
-#    LOCAL_SECRETS_PATH,
-#    PROFILE_FILENAME,
-#)
 
 # ---------------------------------------------------------
-# ComfyUI functie 
+# 1. COMFYUI AFBEELDING GENERATIE (Optioneel)
 # ---------------------------------------------------------
 
-def generate_image_comfy(prompt: str):
+def generate_image_comfy(prompt: str) -> bytes:
+    """Genereert een afbeelding via een lokale ComfyUI instantie."""
     workflow = {
         "prompt": {
-            "0": {
-                "inputs": {
-                    "text": prompt
-                },
-                "class_type": "CLIPTextEncode"
-            },
+            "0": {"inputs": {"text": prompt}, "class_type": "CLIPTextEncode"},
             "1": {
                 "inputs": {
                     "seed": 12345,
@@ -40,63 +30,68 @@ def generate_image_comfy(prompt: str):
                     "denoise": 1.0,
                     "model": "checkpoint",
                     "positive": ["0"],
-                    "negative": []
+                    "negative": [],
                 },
-                "class_type": "KSampler"
+                "class_type": "KSampler",
             },
             "2": {
-                "inputs": {
-                    "samples": ["1"],
-                    "vae": "vae"
-                },
-                "class_type": "VAEDecode"
+                "inputs": {"samples": ["1"], "vae": "vae"},
+                "class_type": "VAEDecode",
             },
-            "3": {
-                "inputs": {
-                    "images": ["2"]
-                },
-                "class_type": "SaveImage"
-            }
+            "3": {"inputs": {"images": ["2"]}, "class_type": "SaveImage"},
         }
     }
 
-    response = requests.post("http://127.0.0.1:8188/prompt", json=workflow)
-    data = response.json()
+    try:
+        response = requests.post("http://127.0.0.1:8188/prompt", json=workflow, timeout=30)
+        response.raise_for_status()
+        data = response.json()
 
-    # Haal de afbeelding op
-    image_name = data["output"]["images"][0]["filename"]
-    image_bytes = requests.get(f"http://127.0.0.1:8188/view?filename={image_name}").content
+        image_name = data["output"]["images"][0]["filename"]
+        img_response = requests.get(
+            f"http://127.0.0.1:8188/view?filename={image_name}", timeout=30
+        )
+        img_response.raise_for_status()
+        return img_response.content
+    except Exception as e:
+        logging.exception(f"ComfyUI generatie mislukt: {e}")
+        raise RuntimeError(f"ComfyUI niet bereikbaar: {e}")
 
-    return image_bytes
+
 # ---------------------------------------------------------
-# PROFIEL LADEN UIT eva_profile.json
+# 2. PERSONA & PROFIEL BEHEER
 # ---------------------------------------------------------
 
-def get_persona_image():
-    """
-    Retourneert het pad naar de afbeelding die hoort bij de gekozen persona.
-    """
+def get_persona_image() -> Path:
+    """Retourneert het pad naar de afbeelding die hoort bij de gekozen persona."""
     choice = st.session_state.get("active_persona", "Eva Lumen")
 
     image_map = {
         "Eva Lumen": "Eva.jpg",
         "Astraea": "Astraea.jpg",
-        "Standaard": "default.jpg"
+        "Standaard": "default.jpg",
     }
 
     filename = image_map.get(choice, "default.jpg")
     return Path(__file__).parent / "images" / filename
 
-def load_profile():
-    """
-    Laadt het profiel op basis van de persona‑switcher.
-    """
+
+@st.cache_data(show_spinner=False)
+def load_profile_file(profile_path_str: str) -> Dict[str, Any]:
+    """Leest een profielbestand éénmalig in via Streamlit caching."""
+    path = Path(profile_path_str)
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_profile() -> tuple[str, str]:
+    """Laadt het persona-profiel op basis van de actieve selectie."""
     choice = st.session_state.get("active_persona", "Eva Lumen")
 
     profile_map = {
         "Eva Lumen": "eva_profile.json",
         "Astraea": "astraea_profile.json",
-        "Standaard": "default_profile.json"
+        "Standaard": "default_profile.json",
     }
 
     filename = profile_map.get(choice, "default_profile.json")
@@ -107,38 +102,29 @@ def load_profile():
         return "", ""
 
     try:
-        with profile_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("persona", ""), data.get("description", "")
+        data = load_profile_file(str(profile_path))
+        return (data.get("persona", ""), data.get("description", ""))
     except Exception as e:
         logging.exception(f"Kon profiel niet laden: {e}")
         return "", ""
 
+
 # ---------------------------------------------------------
-# 3. SYSTEM PROMPT MET EVA'S PROFIEL
+# 3. SYSTEM PROMPT OPBOUW
 # ---------------------------------------------------------
 
-def system_prompt():
-    """
-    Bouwt de system prompt op basis van:
-    - Het gekozen persona-profiel (JSON)
-    - Eventuele session_state overrides
-    - Document- en webcontext
-    """
+@st.cache_data(show_spinner=False)
+def cached_system_prompt(
+    persona_json: str,
+    description_json: str,
+    persona_session: str,
+    profile_session: str,
+) -> str:
+    """Bouwt de basale system prompt op uit profielbestanden en sessiedata."""
+    persona_block = "\n".join(filter(None, [persona_json, persona_session])).strip()
+    description_block = "\n".join(filter(None, [description_json, profile_session])).strip()
 
-    # 1. Laad profiel uit JSON
-    persona_json, description_json = load_profile()
-
-    # 2. Session overrides (optioneel)
-    persona_session = st.session_state.get("persona", "")
-    profile_session = st.session_state.get("profile", "")
-
-    # 3. Combineer profielinformatie
-    persona_block = "\n".join([persona_json, persona_session]).strip()
-    description_block = "\n".join([description_json, profile_session]).strip()
-
-    # 4. Bouw de system prompt
-    base_prompt = f"""
+    return f"""
 {persona_block}
 
 {description_block}
@@ -151,133 +137,114 @@ Contextregels:
 - Vermijd overbodige herhaling, formele taal en technische disclaimers.
 """.strip()
 
-    return base_prompt
 
-# ---------------------------------------------------------
-# 4. HOOFD FUNCTIE: EVA'S ANTWOORD
-# ---------------------------------------------------------
-def answer_question(
-    question: str,
-    context: str = "",
-    use_document_index: bool = True):
+def system_prompt() -> str:
+    """Ophaal-functie voor de gecachete system prompt."""
+    persona_json, description_json = load_profile()
 
-    system_msg_content = system_prompt()
-
-    rag_needed = (
-        bool(st.session_state.get("sections")) or
-        bool(st.session_state.get("document_index")) or
-        bool(st.session_state.get("document_index_lazy"))
+    return cached_system_prompt(
+        persona_json,
+        description_json,
+        st.session_state.get("persona", ""),
+        st.session_state.get("profile", ""),
     )
+
+
+# ---------------------------------------------------------
+# 4. HOOFDFUNCTIE: EVA'S ANTWOORD GENERATIE
+# ---------------------------------------------------------
+
+def answer_question(
+    question: str, 
+    context: str = "", 
+    use_document_index: bool = True
+) -> str:
+    """
+    Verwerkt de vraag van de gebruiker, verzamelt RAG-context,
+    en stuurt een opgeruimd bericht naar het gekozen AI-model.
+    """
     check_limits()
+
+    # 1. Base system prompt ophalen
+    base_system = system_prompt()
+
+    # 2. Document- retrieval via RAG
     document_context_str = ""
+    rag_needed = (
+        bool(st.session_state.get("sections"))
+        or bool(st.session_state.get("document_index"))
+        or bool(st.session_state.get("document_index_lazy"))
+    )
 
     if use_document_index and rag_needed:
-
         rag_mode = st.session_state.get("rag_mode", "auto")
+        logging.info(f"Retrieval gestart met modus '{rag_mode}' voor vraag: {question[:50]}...")
 
-        print(">>> retrieve_context wordt aangeroepen")
+        document_context_str = retrieve_context(question, mode=rag_mode) or ""
 
-        document_context_str = retrieve_context(
-            question,
-            mode=rag_mode
-        )
+    # 3. Context-onderdelen verzamelen en bundelen
+    context_parts = []
 
-        print(">>> retrieve_context klaar")
+    if document_context_str.strip():
+        context_parts.append(f"### DOCUMENT CONTEXT:\n{document_context_str}")
 
-        if document_context_str is None:
-            document_context_str = ""
-
-    # -------------------------------------------------
-    # Context opbouwen
-    # -------------------------------------------------
-
-    final_context = ""
-
-    if document_context_str:
-        final_context += (
-            "Context uit documenten:\n"
-            f"{document_context_str}\n\n"
-            "---\n\n"
-        )
-
-    if context:
-        final_context += (
-            "Context uit geüploade bestanden:\n"
-            f"{context}\n\n"
-            "---\n\n"
-        )
+    if context.strip():
+        context_parts.append(f"### DIRECTE BESTANDSCONTEXT:\n{context}")
 
     web_context = st.session_state.get("web_context", "")
+    if web_context.strip():
+        context_parts.append(f"### WEBCONTEXT:\n{web_context}")
 
-    if web_context:
-        final_context += (
-            "Webcontext:\n"
-            f"{web_context}\n\n"
-            "---\n\n"
-        )
+    # 4. Punt 4 opgelost: Één gecombineerd System Block bouwen
+    if context_parts:
+        combined_context = "\n\n---\n\n".join(context_parts)
+        full_system_prompt = f"{base_system}\n\n====================\nGEBRUIK DE ONDERSTAANDE CONTEXT OM DE VRAAG TE BEANTWOORDEN:\n\n{combined_context}\n===================="
+    else:
+        full_system_prompt = base_system
 
-    if not final_context:
-        final_context = "(Geen extra context beschikbaar.)"
+    # 5. Punt 3 & 5 opgelost: Schonere chatgeschiedenis-slice zonder dubbele vraag
+    raw_messages = st.session_state.get("messages", [])
 
-    # -------------------------------------------------
-    # Chatgeschiedenis
-    # -------------------------------------------------
+    # Als de meest recente message in session_state al de vraag van de gebruiker is, 
+    # sluiten we deze uit van de historie om dubbele verzending te voorkomen.
+    if raw_messages and raw_messages[-1].get("role") == "user" and raw_messages[-1].get("content") == question:
+        history_source = raw_messages[:-1]
+    else:
+        history_source = raw_messages
 
-    chat_history = []
+    # Neem de laatste 10 geschiedenisberichten en filter speciale/invalid rollen
+    formatted_history = []
+    for m in history_source[-10:]:
+        role = m.get("role", "user")
 
-    for m in st.session_state.get("messages", [])[-10:]:
+        # Mappen van speciale rollen naar geaccepteerde API rollen
+        if role == "image":
+            role = "assistant"
+            content = m.get("content", "🎨 [Afbeelding gegenereerd]")
+        else:
+            content = m.get("content", "")
 
-        chat_history.append({
-            "role": m["role"],
-            # .get() voorkomt een crash als 'content' ontbreekt (bijv. bij een afbeelding)
-            "content": m.get("content", "[Afbeelding]")
-        })
+        if role in ("user", "assistant", "system") and content:
+            formatted_history.append({"role": role, "content": content})
 
-    # -------------------------------------------------
-    # Messages voor AI
-    # -------------------------------------------------
+    # 6. Samenstellen van de definitieve berichtenlijst
+    messages: List[Dict[str, str]] = []
 
-    messages = []
+    # A. Het gecombineerde system block
+    messages.append({"role": "system", "content": full_system_prompt})
 
-    messages.append({
-        "role": "system",
-        "content": system_msg_content
-    })
+    # B. De opgeruimde chatgeschiedenis
+    messages.extend(formatted_history)
 
-    if final_context:
-        messages.append({
-            "role": "system",
-            "content": final_context
-        })
+    # C. De actuele vraag (exact 1 keer aan het einde)
+    messages.append({"role": "user", "content": question})
 
-    messages.extend(chat_history)
+    # Debug-logging voor de console
+    logging.info(f"Totaal aantal berichten naar AI: {len(messages)} (Geschiedenis: {len(formatted_history)})")
 
-    messages.append({
-        "role": "user",
-        "content": question
-    })
-
-    # -------------------------------------------------
-    # Debug
-    # -------------------------------------------------
-
-    #print("=" * 80)
-    #print("MESSAGES NAAR AI")
-    #print("=" * 80)
-
-    #for i, m in enumerate(messages):
-    #    print(f"\n[{i}] {m['role']}")
-    #    print(m["content"][:30])
-
-    #print("=" * 80)
-
-    # -------------------------------------------------
-    # AI
-    # -------------------------------------------------
-
+    # 7. Aanpakken van het AI-router model
     try:
         return ask_ai(messages)
-
     except Exception as exc:
-        logging.exception(exc)
-        return f"[FOUT: {exc}]"
+        logging.exception(f"Fout tijdens ask_ai aanroep: {exc}")
+        return f"🛑 Er is een fout opgetreden bij het verwerken van je vraag: {exc}"

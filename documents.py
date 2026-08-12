@@ -10,7 +10,7 @@ import glob
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Union, Tuple
+from typing import List, Dict, Any, Union, Tuple, Optional
 
 import fitz  # PyMuPDF
 import docx
@@ -31,22 +31,27 @@ from streamlit.runtime.uploaded_file_manager import UploadedFile
 from embeddings import get_embedding_cached
 from utils import cosine_similarity, split_text
 
+try:
+    from config import EMBEDDING_MODEL as DEFAULT_EMBED_MODEL
+except ImportError:
+    DEFAULT_EMBED_MODEL = "mxbai-embed-large:latest"
+
 # ---------------------------------------------------------
 # CONFIGURATIE & CONSTANTEN
 # ---------------------------------------------------------
 DEFAULT_CHUNK_SIZE = 800
 DEFAULT_OVERLAP = 100
 
-MAX_CONTEXT_CHARS = 12000
-MAX_CHUNK_CHARS_IN_CONTEXT = 2000
+# Geoptimaliseerd voor GTX 1050 VRAM (~8k tekens max)
+MAX_CONTEXT_CHARS = 8000
+MAX_CHUNK_CHARS_IN_CONTEXT = 1800
 MAX_EMBED_CHUNKS = 500
 SUMMARY_LENGTH = 1000
 
 TOP_DOCS = 5
 TOP_CHUNKS = 5
-DEFAULT_TOP_N = 10
+DEFAULT_TOP_N = 8
 
-EMBEDDING_DIMENSION = 768
 INDEX_FILENAME = "document_index.json"
 LAZY_INDEX_FILENAME = "document_index_lazy.json"
 
@@ -63,7 +68,6 @@ def load_document(file: Union[Path, str, UploadedFile]) -> str:
     """
     Universele documentlezer.
     Ondersteunt: TXT, PDF, DOCX, XLSX, HTML/HTM.
-    Accepteert Path-objecten, bestandspaden als string, of Streamlit UploadedFile.
     """
     if isinstance(file, UploadedFile):
         filename = file.name.lower()
@@ -159,7 +163,7 @@ def extract_document(path: Path) -> Tuple[str, List[str]]:
         return "", []
 
 
-def embed_document_on_demand(source_path: str, embed_model: str = "mxbai-embed-large:latest") -> List[Dict[str, Any]]:
+def embed_document_on_demand(source_path: str, embed_model: str = DEFAULT_EMBED_MODEL) -> List[Dict[str, Any]]:
     """
     Laadt een document on-demand, splitst het in chunks en berekent embeddings.
     """
@@ -181,7 +185,7 @@ def embed_document_on_demand(source_path: str, embed_model: str = "mxbai-embed-l
 
 
 # ---------------------------------------------------------
-# 2. FULL INDEX MANAGEMENT (Met timestamp-deduplicatie)
+# 2. FULL INDEX MANAGEMENT
 # ---------------------------------------------------------
 
 def load_or_create_index(folder_path: str) -> List[Dict[str, Any]]:
@@ -198,7 +202,7 @@ def load_or_create_index(folder_path: str) -> List[Dict[str, Any]]:
     return []
 
 
-def save_index(folder_path: str) -> Path | None:
+def save_index(folder_path: str) -> Optional[Path]:
     index_path = Path(folder_path) / INDEX_FILENAME
     try:
         safe = []
@@ -216,7 +220,7 @@ def save_index(folder_path: str) -> Path | None:
         return None
 
 
-def scan_and_index_folder_full(folder_path: str, embed_model: str = "mxbai-embed-large:latest"):
+def scan_and_index_folder_full(folder_path: str, embed_model: str = DEFAULT_EMBED_MODEL):
     folder = Path(folder_path)
     if not folder.is_dir():
         st.sidebar.error(f"Map niet gevonden: {folder}")
@@ -225,7 +229,6 @@ def scan_and_index_folder_full(folder_path: str, embed_model: str = "mxbai-embed
     load_or_create_index(folder_path)
     current_index = st.session_state.get("document_index", [])
 
-    # Index opbouwen van bestaande bronnen met mtime
     indexed_map = {}
     for item in current_index:
         src = item.get("source")
@@ -246,7 +249,6 @@ def scan_and_index_folder_full(folder_path: str, embed_model: str = "mxbai-embed
         mtime = p.stat().st_mtime
         str_p = str(p)
 
-        # Overslaan als het bestand al met dezelfde of nieuwere mtime is geïndexeerd
         if str_p in indexed_map and indexed_map[str_p] >= mtime:
             continue
 
@@ -267,7 +269,6 @@ def scan_and_index_folder_full(folder_path: str, embed_model: str = "mxbai-embed
             logging.exception(f"Fout bij verwerken {p.name}: {e}")
 
     if updated_sources:
-        # Verwijder verouderde entries van de bijgewerkte bestanden en voeg de nieuwe toe
         cleaned_index = [item for item in current_index if item.get("source") not in updated_sources]
         cleaned_index.extend(new_entries)
         st.session_state.document_index = cleaned_index
@@ -280,33 +281,30 @@ def scan_and_index_folder_full(folder_path: str, embed_model: str = "mxbai-embed
 def get_relevant_document_chunks_full(
     question: str,
     top_n: int = DEFAULT_TOP_N,
-    embed_model: str = "mxbai-embed-large:latest"
+    embed_model: str = DEFAULT_EMBED_MODEL
 ) -> List[Dict[str, str]]:
     index = st.session_state.get("document_index", [])
     if not index:
         return []
 
     q_emb = get_embedding_cached(question, model=embed_model)
-    sims: List[Tuple[float, Dict[str, Any]]] = []
+    if q_emb is None:
+        logging.warning("Vraag-embedding kon niet berekend worden.")
+        return []
 
+    sims: List[Tuple[float, Dict[str, Any]]] = []
     for it in index:
         emb_raw = it.get("embedding")
-        if isinstance(emb_raw, (list, np.ndarray)):
-            emb = np.asarray(emb_raw, dtype=np.float32)
-        else:
-            emb = np.zeros(EMBEDDING_DIMENSION, dtype=np.float32)
-        sims.append((cosine_similarity(q_emb, emb), it))
+        if emb_raw is None:
+            continue
+        emb = np.asarray(emb_raw, dtype=np.float32)
+        score = cosine_similarity(q_emb, emb)
+        sims.append((score, it))
 
     sims.sort(key=lambda x: x[0], reverse=True)
     top = sims[:top_n]
 
-    return [
-        {
-            "content": it.get("content", ""),
-            "source": it.get("source", "")
-        }
-        for score, it in top
-    ]
+    return [{"content": it.get("content", ""), "source": it.get("source", "")} for score, it in top]
 
 
 # ---------------------------------------------------------
@@ -334,7 +332,7 @@ def load_or_create_lazy_index(folder_path: str) -> List[Dict[str, Any]]:
     return []
 
 
-def save_lazy_index(folder_path: str) -> Path | None:
+def save_lazy_index(folder_path: str) -> Optional[Path]:
     index_path = Path(folder_path) / LAZY_INDEX_FILENAME
     try:
         safe = []
@@ -352,7 +350,7 @@ def save_lazy_index(folder_path: str) -> Path | None:
         return None
 
 
-def scan_and_index_folder_lazy(folder_path: str, embed_model: str = "mxbai-embed-large:latest"):
+def scan_and_index_folder_lazy(folder_path: str, embed_model: str = DEFAULT_EMBED_MODEL):
     folder = Path(folder_path)
     if not folder.is_dir():
         st.sidebar.error(f"Map niet gevonden: {folder}")
@@ -409,47 +407,30 @@ def scan_and_index_folder_lazy(folder_path: str, embed_model: str = "mxbai-embed
         st.sidebar.info("Geen nieuwe of gewijzigde bestanden gevonden.")
 
 
-def load_document_on_demand(file_path: str) -> List[Dict[str, str]]:
-    """
-    Laadt een document pas wanneer het nodig is en splitst het in chunks.
-    """
-    try:
-        p = Path(file_path)
-        if not p.is_file():
-            return []
-
-        _, chunks = extract_document(p)
-        return [{"content": chunk, "source": str(p)} for chunk in chunks]
-    except Exception as e:
-        logging.exception(f"Fout bij on-demand laden van {file_path}: {e}")
-        return []
-
-
 def get_relevant_document_chunks_lazy(
     question: str,
     top_n_docs: int = TOP_DOCS,
     top_n_chunks_per_doc: int = TOP_CHUNKS,
-    embed_model: str = "mxbai-embed-large:latest"
+    embed_model: str = DEFAULT_EMBED_MODEL
 ) -> List[Dict[str, str]]:
     index = st.session_state.get("document_index_lazy", [])
     if not index:
         return []
 
     q_emb = get_embedding_cached(question, model=embed_model)
+    if q_emb is None:
+        return []
 
     doc_scores: List[Tuple[float, Dict[str, Any]]] = []
     for item in index:
         emb_raw = item.get("embedding")
         if emb_raw is not None:
             emb = np.asarray(emb_raw, dtype=np.float32)
-        else:
-            emb = np.zeros(EMBEDDING_DIMENSION, dtype=np.float32)
-        doc_scores.append((cosine_similarity(q_emb, emb), item))
+            doc_scores.append((cosine_similarity(q_emb, emb), item))
 
     doc_scores.sort(key=lambda x: x[0], reverse=True)
     top_docs = [item for _, item in doc_scores[:top_n_docs]]
 
-    # Gebruik embed_document_on_demand om dubbel rekenwerk te voorkomen
     all_chunks = []
     for doc in top_docs:
         chunks_embedded = embed_document_on_demand(doc["source"], embed_model=embed_model)
@@ -461,27 +442,23 @@ def get_relevant_document_chunks_lazy(
     chunk_scores: List[Tuple[float, Dict[str, Any]]] = []
     for ch in all_chunks:
         emb = ch.get("embedding")
-        if emb is None:
-            continue
-        chunk_scores.append((cosine_similarity(q_emb, emb), ch))
+        if emb is not None:
+            chunk_scores.append((cosine_similarity(q_emb, emb), ch))
 
     chunk_scores.sort(key=lambda x: x[0], reverse=True)
-    top_chunks = [
+    return [
         {"content": ch["content"], "source": ch["source"]}
         for _, ch in chunk_scores[: top_n_docs * top_n_chunks_per_doc]
     ]
 
-    logging.info(f"Lazy RAG: {len(top_docs)} docs geëvalueerd, top {len(top_chunks)} chunks geselecteerd.")
-    return top_chunks
-
 
 # ---------------------------------------------------------
-# 4. RETRIEVAL CONTROLLER & COMPRESSIE
+# 4. RANKING, RETRIEVAL CONTROLLER & COMPRESSIE
 # ---------------------------------------------------------
 
 def rank_chunks_by_keyword(question: str, chunks: List[Dict[str, Any]], top_n: int = DEFAULT_TOP_N) -> List[Dict[str, Any]]:
     """
-    Fallback op basis van Jaccard-overlap wanneer embeddings offline zijn.
+    Fallback op basis van Jaccard-overlap / trefwoord-matching.
     """
     q_words = set(re.findall(r'\w+', question.lower()))
     if not q_words:
@@ -499,16 +476,27 @@ def rank_chunks_by_keyword(question: str, chunks: List[Dict[str, Any]], top_n: i
     return [c for _, c in scored[:top_n]]
 
 
-def rank_chunks(question: str, chunks: List[Dict[str, Any]], top_n: int = DEFAULT_TOP_N, embed_model: str = "mxbai-embed-large:latest") -> List[Dict[str, Any]]:
+def rank_chunks(
+    question: str, 
+    chunks: List[Dict[str, Any]], 
+    top_n: int = DEFAULT_TOP_N, 
+    embed_model: str = DEFAULT_EMBED_MODEL
+) -> List[Dict[str, Any]]:
+    """
+    Semantische ranking op basis van Cosine Similarity.
+    """
     if not chunks:
         return []
 
     q_emb = get_embedding_cached(question, model=embed_model)
+    if q_emb is None:
+        logging.warning("Geen vraag-embedding beschikbaar; valt terug op keyword ranking.")
+        return rank_chunks_by_keyword(question, chunks, top_n=top_n)
+
     scored = []
     for ch in chunks:
         emb_raw = ch.get("embedding")
         if emb_raw is None:
-            logging.warning(f"Chunk mist embedding en wordt overgeslagen bij ranking: {ch.get('source')}")
             continue
         emb = np.asarray(emb_raw, dtype=np.float32)
         score = cosine_similarity(q_emb, emb)
@@ -520,19 +508,20 @@ def rank_chunks(question: str, chunks: List[Dict[str, Any]], top_n: int = DEFAUL
 
 def compress_context(chunks: List[Dict[str, str]], max_chars: int = MAX_CONTEXT_CHARS) -> str:
     """
-    Combineert chunks tot één overzichtelijke context.
-    Aftoppen van individuele chunks garandeert een brede verdeling van bronnen.
+    Combineert geselecteerde chunks tot één schone context-block.
     """
     combined = ""
     for ch in chunks:
         content = ch.get("content", "")[:MAX_CHUNK_CHARS_IN_CONTEXT]
-        block = f"Bron: {ch.get('source','')}\n{content}\n\n---\n\n"
+        source = ch.get("source", "Onbekende bron")
+        block = f"Bron: {source}\n{content}\n\n---\n\n"
+
         if len(combined) + len(block) > max_chars:
             break
         combined += block
 
     if not combined:
-        return "(Geen relevante context gevonden.)"
+        return "(Geen relevante documentcontext gevonden.)"
     return combined
 
 
@@ -540,10 +529,11 @@ def retrieve_context(
     question: str,
     mode: str = "auto",
     top_n: int = DEFAULT_TOP_N,
-    embed_model: str = "mxbai-embed-large:latest"
+    embed_model: str = DEFAULT_EMBED_MODEL
 ) -> str:
     """
     Centrale regisseur voor context retrieval.
+    Ondersteunt geüploade bestanden, full index, lazy index en hybride modus.
     """
     logging.info("retrieve_context gestart")
 
@@ -551,45 +541,43 @@ def retrieve_context(
     full_index = st.session_state.get("document_index", [])
     lazy_index = st.session_state.get("document_index_lazy", [])
 
-    # Test of embeddings werken
-    try:
-        test_emb = get_embedding_cached("test", model=embed_model)
-        embeddings_offline = (
-            test_emb is None
-            or len(test_emb) == 0
-            or np.all(np.asarray(test_emb) == 0)
-        )
-    except Exception as e:
-        logging.warning(f"Embedding-service niet bereikbaar ({e}), valt terug op keyword matching.")
-        embeddings_offline = True
+    # Controleer de werking van de embedding-service
+    test_emb = get_embedding_cached("test", model=embed_model)
+    embeddings_offline = (test_emb is None or len(test_emb) == 0)
 
-    retrieved_chunks = []
+    retrieved_chunks: List[Dict[str, Any]] = []
     retrieval_mode = "none"
 
-    # Scenario A: Geüpload document in actieve sessie
+    # Harmoniseer de UI-modus (bijv. "hybrid" -> "auto")
+    effective_mode = st.session_state.get("rag_mode", mode)
+    if effective_mode not in ("auto", "semantic", "keyword"):
+        effective_mode = "auto"
+
+    # 1. Direct geüpload document in actieve sessie (Punt 14)
     if uploaded_sections:
-        chunks_to_rank = [{"content": ch, "source": "Geüpload document"} for ch in uploaded_sections]
-        if embeddings_offline:
+        chunks_to_rank = [{"content": ch, "source": "Direct Geüpload Document"} for ch in uploaded_sections]
+
+        if embeddings_offline or effective_mode == "keyword":
             retrieved_chunks = rank_chunks_by_keyword(question, chunks_to_rank, top_n=top_n)
-            retrieval_mode = "uploaded_document_keyword"
+            retrieval_mode = "uploaded_doc_keyword"
         else:
             for ch in chunks_to_rank:
                 ch["embedding"] = get_embedding_cached(ch["content"], model=embed_model)
             retrieved_chunks = rank_chunks(question, chunks_to_rank, top_n=top_n, embed_model=embed_model)
-            retrieval_mode = "uploaded_document_semantic"
+            retrieval_mode = "uploaded_doc_semantic"
 
-    # Scenario B: Volledige index
-    elif full_index and (mode in ("full", "auto")):
-        if embeddings_offline:
+    # 2. Volledige index (Full Index)
+    elif full_index and effective_mode in ("auto", "semantic", "keyword"):
+        if embeddings_offline or effective_mode == "keyword":
             retrieved_chunks = rank_chunks_by_keyword(question, full_index, top_n=top_n)
             retrieval_mode = "full_index_keyword"
         else:
             retrieved_chunks = get_relevant_document_chunks_full(question, top_n=top_n, embed_model=embed_model)
             retrieval_mode = "full_index_semantic"
 
-    # Scenario C: Lazy index
-    elif lazy_index and (mode in ("lazy", "auto")):
-        if embeddings_offline:
+    # 3. Luie index (Lazy Index)
+    elif lazy_index and effective_mode in ("auto", "semantic", "keyword"):
+        if embeddings_offline or effective_mode == "keyword":
             retrieved_chunks = rank_chunks_by_keyword(question, lazy_index, top_n=top_n)
             retrieval_mode = "lazy_index_keyword"
         else:
@@ -598,16 +586,22 @@ def retrieve_context(
 
     context_str = compress_context(retrieved_chunks)
 
+    # UI Debug Informatie bijwerken (Punt 10 context preview)
     st.session_state.last_retrieval_info = {
         "mode": retrieval_mode,
         "chunks": len(retrieved_chunks),
         "context_chars": len(context_str),
+        "preview": context_str[:1500] + ("…" if len(context_str) > 1500 else "")
     }
 
     logging.info(f"retrieve_context voltooid ({len(retrieved_chunks)} chunks via '{retrieval_mode}')")
     return context_str
 
 
-def document_to_chunks(file: Union[Path, str, UploadedFile], chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_OVERLAP) -> List[str]:
+def document_to_chunks(
+    file: Union[Path, str, UploadedFile], 
+    chunk_size: int = DEFAULT_CHUNK_SIZE, 
+    overlap: int = DEFAULT_OVERLAP
+) -> List[str]:
     text = load_document(file)
     return split_text(text, chunk_size, overlap)
