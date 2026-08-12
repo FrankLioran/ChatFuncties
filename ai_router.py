@@ -9,15 +9,14 @@ from config import DEFAULT_TEMPERATURE
 from groq import Groq
 from api_keys import get_groq_api_key, get_gemini_api_key
 from safety import register_usage
-from ollama import Client
+# from ollama import Client
 
 OLLAMA_CLIENT = Client(host="http://127.0.0.1:11434")
 
 # Fallback-modellen per provider als er niks geselecteerd is in st.session_state
 DEFAULT_MODELS = {
-    "Lokaal": "qwen2.5:3b",
     "Groq": "openai/gpt-oss-20b",
-    "Gemini": "gemini-3.5-flash"  # Let op: als Google 404 geeft, pas aan naar bijv. 'gemini-1.5-flash' of 'gemini-2.0-flash'
+    "Gemini": "gemini-3.5-flash" 
 }
 
 def debug_provider(provider, model, messages):
@@ -45,34 +44,34 @@ def ask_ai(messages):
     if provider == "Groq":
         return ask_groq(messages, model)
 
-    return ask_ollama(messages, model)
+    return NONE #ask_ollama(messages, model)
 
-def ask_ollama(messages, model=None):
-    if not model:
-        model = get_active_model("Lokaal")
+#def ask_ollama(messages, model=None):
+#    if not model:
+#        model = get_active_model("Lokaal")
 
-    debug_provider(
-        st.session_state.get("ai_provider", "Lokaal"),
-        model,
-        messages
-    )
+#    debug_provider(
+#        st.session_state.get("ai_provider", "Lokaal"),
+#        model,
+#        messages
+#    )
 
-    reply = OLLAMA_CLIENT.chat(
-        model=model,
-        messages=messages,
-        options={
-            "temperature": st.session_state.get(
-                "temperature",
-                DEFAULT_TEMPERATURE
-            ),
-            "num_gpu": 999,
-            "num_batch": 512,
-            "num_thread": 0,
-        }
-    )
+#    reply = OLLAMA_CLIENT.chat(
+#        model=model,
+#        messages=messages,
+#        options={
+#            "temperature": st.session_state.get(
+#                "temperature",
+#                DEFAULT_TEMPERATURE
+#            ),
+#            "num_gpu": 999,
+#            "num_batch": 512,
+#            "num_thread": 0,
+#        }
+#    )
 
-    register_usage(0)
-    return reply["message"]["content"].strip()
+#    register_usage(0)
+#    return reply["message"]["content"].strip()
 
 def ask_gemini(messages, model=None):
     if not model:
