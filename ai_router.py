@@ -44,7 +44,7 @@ def ask_ai(messages):
     if provider == "Groq":
         return ask_groq(messages, model)
 
-    return NONE #ask_ollama(messages, model)
+    return None #ask_ollama(messages, model)
 
 #def ask_ollama(messages, model=None):
 #    if not model:
