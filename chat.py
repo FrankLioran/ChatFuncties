@@ -158,7 +158,7 @@ def answer_question(
     question: str, 
     context: str = "", 
     use_document_index: bool = True
-) -> str:
+    ) -> str:
     """
     Verwerkt de vraag van de gebruiker, verzamelt RAG-context,
     en stuurt een opgeruimd bericht naar het gekozen AI-model.
