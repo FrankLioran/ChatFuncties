@@ -100,11 +100,18 @@ with st.sidebar:
     st.header("AI Provider")
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
-        ["Gemini", "Groq"],
+        ["Lokaal", "Gemini", "Groq"],
         index=0
     )
 
-    if st.session_state["ai_provider"] == "Gemini":
+    if st.session_state["ai_provider"] == "Lokaal":
+        st.session_state.model_name = st.selectbox(
+            "Modelnaam",
+            ["qwen3.5", "gemma4:e4b", "gemma4:e2b", "gemma3:4b", "gemma2:9B", "qwen2.5:3b", "llama3.2:3b", "gemma3:1b", "mistral:7b",],
+            index=0
+        )
+    
+    elif st.session_state["ai_provider"] == "Gemini":
         st.session_state.model_name = st.selectbox(
             "Modelnaam",
             [
@@ -123,28 +130,6 @@ with st.sidebar:
             "Modelnaam",
             ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"],
             index=0
-        )
-
-    # API Keys
-    st.subheader("🔑 API Keys")
-    with st.expander("⚠️ Lees eerst", expanded=False):
-        st.markdown("""
-        Deze applicatie gebruikt uw eigen API-key voor externe providers.
-        - De sleutel wordt uitsluitend gebruikt om verzoeken te sturen.
-        - Er wordt niets permanent opgeslagen of gelogd.
-        """)
-
-    ack = st.checkbox("Ik wil mijn eigen API-key gebruiken.")
-    if ack:
-        st.session_state.gemini_api_key_user = st.text_input(
-            "Gemini API Key",
-            value=st.session_state.get("gemini_api_key_user", ""),
-            type="password"
-        )
-        st.session_state.groq_api_key_user = st.text_input(
-            "Groq API Key",
-            value=st.session_state.get("groq_api_key_user", ""),
-            type="password"
         )
 
     # Veiligheid & Limieten
@@ -198,6 +183,12 @@ with st.sidebar:
     )
 
     # Afbeeldingen & Spraak
+    st.header("🎙️ Spraak")
+    if st.button("Luister naar spraak"):
+        text = listen_and_transcribe()
+        if text:
+            st.session_state.spoken_text_input = text
+
     st.header("🎨 Afbeeldingen")
     image_prompt = st.text_input("Omschrijving afbeelding:", value="portrait of a red rose in rain")
     if st.button("Genereer afbeelding"):
@@ -214,12 +205,6 @@ with st.sidebar:
                 st.rerun()
             else:
                 st.error("Genereren van afbeelding mislukt.")
-
-    st.header("🎙️ Spraak")
-    if st.button("Luister naar spraak"):
-        text = listen_and_transcribe()
-        if text:
-            st.session_state.spoken_text_input = text
 
     # Debugpaneel (Punt 10 & 15 opgelost)
     st.subheader("🐞 Debugpaneel")
@@ -275,6 +260,30 @@ with st.sidebar:
                     st.sidebar.download_button("⬇️ Download file", data=f, file_name=fp.name, key="dl_chat")
             else:
                 st.sidebar.warning("⚠️ Kon niet opslaan.")
+    st.markdown("---")
+    # API Keys
+    st.subheader("🔑 API Keys")
+    with st.expander("⚠️ Lees eerst", expanded=False):
+        st.markdown("""
+        Deze applicatie gebruikt uw eigen API-key voor externe providers.
+        - De sleutel wordt uitsluitend gebruikt om verzoeken te sturen.
+        - Er wordt niets permanent opgeslagen of gelogd.
+        """)
+
+    ack = st.checkbox("Ik wil mijn eigen API-key gebruiken.")
+    if ack:
+        st.session_state.gemini_api_key_user = st.text_input(
+            "Gemini API Key",
+            value=st.session_state.get("gemini_api_key_user", ""),
+            type="password"
+        )
+        st.session_state.groq_api_key_user = st.text_input(
+            "Groq API Key",
+            value=st.session_state.get("groq_api_key_user", ""),
+            type="password"
+        )
+
+
 
 # ---------------------------------------------------------
 # Hoofdscherm & Chat
@@ -312,26 +321,37 @@ if user_input:
     with st.chat_message("user"):
         st.write(user_input)
 
-    # Controleer of er om een afbeelding wordt gevraagd via het [codewoord]
-    trigger_woorden = ["Genereer een afbeelding", "Genereer afbeelding"]
+    # 1. Gebruik uitsluitend kleine letters in de triggerwoorden!
+    trigger_woorden = ["genereer een afbeelding", "genereer afbeelding", "maak een afbeelding", "teken een afbeelding"]
     wil_afbeelding = any(woord in user_input.lower() for woord in trigger_woorden)
 
     if wil_afbeelding:
         with st.chat_message("assistant"):
             with st.spinner("Ik ben het beeld voor je aan het weven... 🎨"):
-                image_path = generate_and_save_image(user_input)
-                if image_path and Path(image_path).exists():
-                    with open(image_path, "rb") as f:
-                        img_bytes = f.read()
+                try:
+                    # Indien image.py de API-key nodig heeft, kun je eventueel
+                    # st.session_state.gemini_api_key_user meesturen indien van toepassing.
+                    image_path = generate_and_save_image(user_input)
+
+                    if image_path and Path(image_path).exists():
+                        with open(image_path, "rb") as f:
+                            img_bytes = f.read()
+
+                        # 2. Gebruik hier "role": "image" zodat je weergave-loop het herkent!
+                        st.session_state.messages.append({
+                            "role": "image",
+                            "content": f"🎨 Afbeelding gegenereerd voor: *'{user_input}'*",
+                            "image_bytes": img_bytes
+                        })
+                    else:
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": "Het spijt me, Frank. Het weven van de afbeelding is mislukt. Controleer of het beeldmodel goed ingesteld staat."
+                        })
+                except Exception as e:
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": "🎨 [Afbeelding gegenereerd]",
-                        "image_bytes": img_bytes
-                    })
-                else:
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": "Het spijt me, Frank. Het weven van de afbeelding is mislukt."
+                        "content": f"Er ging iets mis tijdens het maken van de afbeelding: {e}"
                     })
     else:
         with st.chat_message("assistant"):
