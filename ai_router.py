@@ -11,7 +11,7 @@ from api_keys import get_groq_api_key, get_gemini_api_key
 from safety import register_usage
 
 # Geen Client-klasse meer; we gebruiken direct de ollama-module
-OLLAMA_CLIENT = None  # placeholder, niet strikt nodig
+#OLLAMA_CLIENT = None  # placeholder, niet strikt nodig
 
 # Fallback-modellen per provider als er niks geselecteerd is in st.session_state
 DEFAULT_MODELS = {
