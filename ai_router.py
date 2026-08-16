@@ -9,9 +9,9 @@ from config import DEFAULT_TEMPERATURE
 from groq import Groq
 from api_keys import get_groq_api_key, get_gemini_api_key
 from safety import register_usage
-# from ollama import Client
 
-OLLAMA_CLIENT = Client(host="http://127.0.0.1:11434")
+# Geen Client-klasse meer; we gebruiken direct de ollama-module
+OLLAMA_CLIENT = None  # placeholder, niet strikt nodig
 
 # Fallback-modellen per provider als er niks geselecteerd is in st.session_state
 DEFAULT_MODELS = {
