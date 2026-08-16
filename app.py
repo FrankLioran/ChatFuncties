@@ -100,21 +100,15 @@ with st.sidebar:
     st.header("AI Provider")
     st.session_state["ai_provider"] = st.selectbox(
         "Kies een AI-provider",
-        ["Lokaal", "Gemini", "Groq"],
+        ["Gemini", "Groq"],
         index=0
     )
-
-    if st.session_state["ai_provider"] == "Lokaal":
-        st.session_state.model_name = st.selectbox(
-            "Modelnaam",
-            ["qwen3.5", "gemma4:e4b", "gemma4:e2b", "gemma3:4b", "gemma2:9B", "qwen2.5:3b", "llama3.2:3b", "gemma3:1b", "mistral:7b",],
-            index=0
-        )
     
-    elif st.session_state["ai_provider"] == "Gemini":
+    if st.session_state["ai_provider"] == "Gemini":
         st.session_state.model_name = st.selectbox(
             "Modelnaam",
             [
+                "gemini-3.7-flash",
                 "gemini-3.6-flash",
                 "gemma-4-26b-a4b-it",
                 "gemini-2.5-flash-lite",
