@@ -9,14 +9,18 @@ import streamlit as st
 from ai_router import ask_ai
 from documents import retrieve_context
 from safety import check_limits
-
+from memory import (
+    update_conversation_summary,
+    save_conversation_to_memory,
+    retrieve_memory_context,
+    get_memory_mode,
+)
 
 # ---------------------------------------------------------
 # 1. COMFYUI AFBEELDING GENERATIE (Optioneel)
 # ---------------------------------------------------------
 
 def generate_image_comfy(prompt: str) -> bytes:
-    """Genereert een afbeelding via een lokale ComfyUI instantie."""
     workflow = {
         "prompt": {
             "0": {"inputs": {"text": prompt}, "class_type": "CLIPTextEncode"},
@@ -63,12 +67,12 @@ def generate_image_comfy(prompt: str) -> bytes:
 # ---------------------------------------------------------
 
 def get_persona_image() -> Path:
-    """Retourneert het pad naar de afbeelding die hoort bij de gekozen persona."""
     choice = st.session_state.get("active_persona", "Eva Lumen")
 
     image_map = {
         "Eva Lumen": "Eva.jpg",
         "Astraea": "Astraea.jpg",
+        "Helion Arcturus": "Helion.jpg",
         "Standaard": "default.jpg",
     }
 
@@ -78,18 +82,28 @@ def get_persona_image() -> Path:
 
 @st.cache_data(show_spinner=False)
 def load_profile_file(profile_path_str: str) -> Dict[str, Any]:
-    """Leest een profielbestand éénmalig in via Streamlit caching."""
     path = Path(profile_path_str)
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+def trim_text_tokens(text: str, max_tokens: int = 2000) -> str:
+    """
+    Trim text to a maximum token estimate.
+    1 token ≈ 4 chars (ruwe schatting).
+    """
+    if not text:
+        return ""
+    max_chars = max_tokens * 4
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n...[TRIMMED]..."
 
 def load_profile() -> tuple[str, str]:
-    """Laadt het persona-profiel op basis van de actieve selectie."""
     choice = st.session_state.get("active_persona", "Eva Lumen")
 
     profile_map = {
         "Eva Lumen": "eva_profile.json",
+        "Helion Arcturus": "helion_arcturus.json",
         "Astraea": "astraea_profile.json",
         "Standaard": "default_profile.json",
     }
@@ -120,7 +134,6 @@ def cached_system_prompt(
     persona_session: str,
     profile_session: str,
 ) -> str:
-    """Bouwt de basale system prompt op uit profielbestanden en sessiedata."""
     persona_block = "\n".join(filter(None, [persona_json, persona_session])).strip()
     description_block = "\n".join(filter(None, [description_json, profile_session])).strip()
 
@@ -139,7 +152,6 @@ Contextregels:
 
 
 def system_prompt() -> str:
-    """Ophaal-functie voor de gecachete system prompt."""
     persona_json, description_json = load_profile()
 
     return cached_system_prompt(
@@ -151,24 +163,35 @@ def system_prompt() -> str:
 
 
 # ---------------------------------------------------------
-# 4. HOOFDFUNCTIE: EVA'S ANTWOORD GENERATIE
+# 4. MEMORY + RAG + TOKEN TRIM ENGINE
 # ---------------------------------------------------------
 
-def answer_question(
-    question: str, 
-    context: str = "", 
-    use_document_index: bool = True
-) -> str:
+def trim_messages_to_token_limit(messages, max_tokens=3000):
     """
-    Verwerkt de vraag van de gebruiker, verzamelt RAG-context,
-    en stuurt een opgeruimd bericht naar het gekozen AI-model.
+    Slimme token-trim:
+    - Houdt system prompt altijd
+    - Houdt laatste user-vraag altijd
+    - Verwijdert oudste assistant/user berichten
+    - Schatting: 1 token ≈ 4 chars
     """
+    def estimate_tokens(msgs):
+        return sum(len(m.get("content", "")) // 4 for m in msgs)
+
+    tokens = estimate_tokens(messages)
+
+    while tokens > max_tokens and len(messages) > 2:
+        # verwijder oudste niet-system bericht
+        messages.pop(1)
+        tokens = estimate_tokens(messages)
+
+    return messages
+
+def answer_question(question: str, context: str = "", use_document_index: bool = True, stream: bool = False) -> str:
     check_limits()
 
-    # 1. Base system prompt ophalen
     base_system = system_prompt()
 
-    # 2. Document- retrieval via RAG
+    # 1. Document-RAG
     document_context_str = ""
     rag_needed = (
         bool(st.session_state.get("sections"))
@@ -176,75 +199,121 @@ def answer_question(
         or bool(st.session_state.get("document_index_lazy"))
     )
 
-    if use_document_index and rag_needed:
-        rag_mode = st.session_state.get("rag_mode", "auto")
-        logging.info(f"Retrieval gestart met modus '{rag_mode}' voor vraag: {question[:50]}...")
+    # Context ophalen kan enkele seconden duren
+    with st.spinner("🧠 Context verzamelen…"):
+        if use_document_index and rag_needed:
+            rag_mode = st.session_state.get("rag_mode", "auto")
+            document_context_str = retrieve_context(question, mode=rag_mode) or ""
 
-        document_context_str = retrieve_context(question, mode=rag_mode) or ""
+        # 2. Memory
+        memory_mode = get_memory_mode()
+        summary = st.session_state.get("conversation_summary", "")
+        memory_ctx = (
+            retrieve_memory_context(question)
+            if memory_mode == "summary_rag"
+            else ""
+        )
+        web_context = st.session_state.get("web_context", "")
 
-    # 3. Context-onderdelen verzamelen en bundelen
+    provider = st.session_state.get("ai_provider", "Lokaal")
+
+    # 3. Context bundelen
     context_parts = []
 
-    if document_context_str.strip():
-        context_parts.append(f"### DOCUMENT CONTEXT:\n{document_context_str}")
+    # Trim afhankelijk van provider
+    if provider == "Gemini":
+        summary_trimmed = summary
+        memory_trimmed = memory_ctx
+        doc_trimmed = document_context_str
+        direct_trimmed = context
+        web_trimmed = web_context
+    else:
+        summary_trimmed = trim_text_tokens(summary, max_tokens=2000)
+        memory_trimmed = trim_text_tokens(memory_ctx, max_tokens=2000)
+        doc_trimmed = trim_text_tokens(document_context_str, max_tokens=2000)
+        direct_trimmed = trim_text_tokens(context, max_tokens=2000)
+        web_trimmed = trim_text_tokens(web_context, max_tokens=2000)
 
-    if context.strip():
-        context_parts.append(f"### DIRECTE BESTANDSCONTEXT:\n{context}")
+    # Nu pas toevoegen aan context_parts
+    if summary_trimmed.strip():
+        context_parts.append(f"### GESPREKSSAMENVATTING:\n{summary_trimmed}")
 
-    web_context = st.session_state.get("web_context", "")
-    if web_context.strip():
-        context_parts.append(f"### WEBCONTEXT:\n{web_context}")
+    if memory_trimmed.strip():
+        context_parts.append(f"### VORIGE GESPREKSCONTEXT (RAG):\n{memory_trimmed}")
 
-    # 4. Punt 4 opgelost: Één gecombineerd System Block bouwen
+    if doc_trimmed.strip():
+        context_parts.append(f"### DOCUMENT CONTEXT:\n{doc_trimmed}")
+
+    if direct_trimmed.strip():
+        context_parts.append(f"### DIRECTE BESTANDSCONTEXT:\n{direct_trimmed}")
+
+    if web_trimmed.strip():
+        context_parts.append(f"### WEBCONTEXT:\n{web_trimmed}")
+
+
     if context_parts:
-        combined_context = "\n\n---\n\n".join(context_parts)
-        full_system_prompt = f"{base_system}\n\n====================\nGEBRUIK DE ONDERSTAANDE CONTEXT OM DE VRAAG TE BEANTWOORDEN:\n\n{combined_context}\n===================="
+        if provider == "Gemini":
+            combined_context = "\n\n---\n\n".join(context_parts)
+        else:
+            combined_context = trim_text_tokens("\n\n---\n\n".join(context_parts), max_tokens=3000)
+
+        full_system_prompt = (
+            f"{base_system}\n\n"
+            "====================\n"
+            "GEBRUIK DE ONDERSTAANDE CONTEXT OM DE VRAAG TE BEANTWOORDEN:\n\n"
+            f"{combined_context}\n"
+            "===================="
+        )
     else:
         full_system_prompt = base_system
 
-    # 5. Punt 3 & 5 opgelost: Schonere chatgeschiedenis-slice zonder dubbele vraag
+    # 4. Chatgeschiedenis
     raw_messages = st.session_state.get("messages", [])
-
-    # Als de meest recente message in session_state al de vraag van de gebruiker is, 
-    # sluiten we deze uit van de historie om dubbele verzending te voorkomen.
     if raw_messages and raw_messages[-1].get("role") == "user" and raw_messages[-1].get("content") == question:
-        history_source = raw_messages[:-1]
+        history = raw_messages[:-1]
     else:
-        history_source = raw_messages
+        history = raw_messages
 
-    # Neem de laatste 10 geschiedenisberichten en filter speciale/invalid rollen
-    formatted_history = []
-    for m in history_source[-10:]:
-        role = m.get("role", "user")
+    messages = [{"role": "system", "content": full_system_prompt}]
 
-        # Mappen van speciale rollen naar geaccepteerde API rollen
-        if role == "image":
-            role = "assistant"
-            content = m.get("content", "🎨 [Afbeelding gegenereerd]")
-        else:
-            content = m.get("content", "")
+    for m in history[-4:]:
+        role = m.get("role", "")
+        content = m.get("content", "")
 
-        if role in ("user", "assistant", "system") and content:
-            formatted_history.append({"role": role, "content": content})
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": str(content)})
 
-    # 6. Samenstellen van de definitieve berichtenlijst
-    messages: List[Dict[str, str]] = []
-
-    # A. Het gecombineerde system block
-    messages.append({"role": "system", "content": full_system_prompt})
-
-    # B. De opgeruimde chatgeschiedenis
-    messages.extend(formatted_history)
-
-    # C. De actuele vraag (exact 1 keer aan het einde)
     messages.append({"role": "user", "content": question})
 
-    # Debug-logging voor de console
-    logging.info(f"Totaal aantal berichten naar AI: {len(messages)} (Geschiedenis: {len(formatted_history)})")
+    # 5. Token-trim
 
-    # 7. Aanpakken van het AI-router model
-    try:
-        return ask_ai(messages)
-    except Exception as exc:
-        logging.exception(f"Fout tijdens ask_ai aanroep: {exc}")
-        return f"🛑 Er is een fout opgetreden bij het verwerken van je vraag: {exc}"
+    provider = st.session_state.get("ai_provider", "Lokaal")
+
+    if provider == "Lokaal":
+        # lokale modellen hebben kleine context → trimmen
+        messages = trim_messages_to_token_limit(messages, max_tokens=3000)
+
+    elif provider == "Groq":
+        # Groq heeft ±32k context → lichte trim
+        messages = trim_messages_to_token_limit(messages, max_tokens=8000)
+
+    elif provider == "Gemini":
+        # Gemini heeft 128k–2M context → NIET trimmen
+        pass
+
+    # STREAMING voor lokale modellen
+    if stream and st.session_state.get("ai_provider") == "Lokaal":
+        from ai_router import stream_ai
+        return stream_ai(messages)   # generator teruggeven
+
+    # 6. Vraag aan model
+    answer = ask_ai(messages)
+
+    # 7. Geheugen bijwerken
+    # Alleen opslaan als het GEEN streaming is
+    if not stream:
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+        update_conversation_summary(st.session_state.messages)
+        save_conversation_to_memory(st.session_state.messages)
+
+    return answer

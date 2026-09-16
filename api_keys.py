@@ -46,3 +46,6 @@ def get_gemini_api_key():
 
 def get_groq_api_key():
     return _get_api_key("groq_api_key")
+
+def get_openai_api_key():
+    return _get_api_key("openai_api_key")

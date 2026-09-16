@@ -1,29 +1,33 @@
+# safety.py
 import streamlit as st
 
+def _get_safe_state():
+    try:
+        return st.session_state
+    except Exception:
+        return None
 
 def check_limits():
-
-    if not st.session_state.safe_mode:
+    ss = _get_safe_state()
+    if not ss or not getattr(ss, "safe_mode", False):
         return
 
-    if st.session_state.requests_used >= st.session_state.request_limit:
+    if getattr(ss, "requests_used", 0) >= getattr(ss, "request_limit", 100):
+        raise RuntimeError("Maximum aantal requests bereikt.")
 
-        raise RuntimeError(
-            "Maximum aantal requests bereikt."
-        )
-
-    if st.session_state.tokens_used >= st.session_state.token_limit:
-
-        raise RuntimeError(
-            "Maximum aantal tokens bereikt."
-        )
-
+    if getattr(ss, "tokens_used", 0) >= getattr(ss, "token_limit", 1000000):
+        raise RuntimeError("Maximum aantal tokens bereikt.")
 
 def register_usage(total_tokens):
+    ss = _get_safe_state()
+    if not ss:
+        return  # Buiten Streamlit (bijv. benchmark) hoeven we niets bij te houden
 
-    provider = st.session_state.get("ai_provider")
-    st.session_state.requests_used += 1
-    if provider != "Lokaal":
-        st.session_state.tokens_used += total_tokens
-    if provider == "Lokaal":
-        return
+    try:
+        provider = ss.get("ai_provider")
+        if "requests_used" in ss:
+            ss.requests_used += 1
+        if provider != "Lokaal" and "tokens_used" in ss:
+            ss.tokens_used += total_tokens
+    except Exception:
+        pass

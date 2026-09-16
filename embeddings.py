@@ -1,8 +1,25 @@
 # embeddings.py
+# ---------------------------------------------------------
+# ROBUUSTE EMBEDDING ENGINE
+#
+# Primaire provider : lokale Ollama
+# Fallback provider : Gemini
+#
+# Eigenschappen:
+# - single + batch embeddings
+# - Ollama response-compatibiliteit
+# - Gemini 429/5xx retry met backoff
+# - batch-output behoudt altijd inputlengte en volgorde
+# - geen stille nulvectoren
+# - Streamlit cache
+# - diagnostiek
+# ---------------------------------------------------------
 
 import logging
 import os
-from typing import Optional
+import random
+import time
+from typing import List, Optional
 
 import numpy as np
 import requests
@@ -31,6 +48,15 @@ GEMINI_EMBEDDING_MODEL = getattr(
     "gemini-embedding-001",
 )
 
+# Dit zijn wachttijden tussen nieuwe pogingen.
+# [2, 5, 10] betekent maximaal drie pogingen totaal.
+GEMINI_RETRY_DELAYS = [2, 5, 10]
+
+# Kleine bescherming tegen directe opeenvolgende REST-calls.
+GEMINI_MIN_INTERVAL_SEC = 0.05
+
+_last_gemini_call_time = 0.0
+
 
 # ---------------------------------------------------------
 # 2. OLLAMA BESCHIKBAARHEID
@@ -39,20 +65,14 @@ GEMINI_EMBEDDING_MODEL = getattr(
 @st.cache_resource(ttl=300)
 def ollama_available() -> bool:
     """
-    Controleert of de lokale Ollama-service bereikbaar is.
+    Controleert uitsluitend of Ollama bereikbaar is.
 
-    Deze functie controleert alleen de bereikbaarheid van Ollama.
-    Er wordt hier bewust NIET gecontroleerd of een specifiek
-    embedding-model beschikbaar is.
-
-    Returns:
-        True wanneer Ollama bereikbaar is.
-        False wanneer de verbinding mislukt.
+    Er wordt hier bewust niet gecontroleerd of een specifiek
+    embedding-model aanwezig is.
     """
     try:
         ollama.list()
         return True
-
     except Exception as exc:
         logger.debug(
             "Ollama is niet beschikbaar: %s",
@@ -70,37 +90,31 @@ def get_gemini_api_key() -> Optional[str]:
     Haalt de Gemini API-key op.
 
     Prioriteit:
-    1. Streamlit session state
-    2. Streamlit secrets
-    3. Omgevingsvariabele
-
-    Returns:
-        API-key als deze beschikbaar is, anders None.
+        1. Streamlit session state
+        2. Streamlit secrets
+        3. environment variable
     """
 
     # 1. Session state
     try:
-        session_key = st.session_state.get("gemini_api_key_user")
-
+        session_key = st.session_state.get(
+            "gemini_api_key_user"
+        )
         if session_key:
             return str(session_key).strip()
-
     except Exception:
         pass
 
     # 2. Streamlit secrets
     try:
         secret_key = st.secrets.get("GEMINI_API_KEY")
-
         if secret_key:
             return str(secret_key).strip()
-
     except Exception:
         pass
 
     # 3. Environment
     env_key = os.environ.get("GEMINI_API_KEY")
-
     if env_key:
         return env_key.strip()
 
@@ -116,19 +130,9 @@ def _validate_embedding(
     provider: str,
 ) -> Optional[np.ndarray]:
     """
-    Zet een embedding om naar een nette float32 numpy-array.
+    Converteert embedding-data naar een 1D float32 numpy-array.
 
-    Er wordt bewust GEEN vaste dimensie gecontroleerd.
-
-    De dimensie wordt bepaald door het gebruikte embedding-model.
-
-    Args:
-        embedding: Ruwe embedding-data.
-        provider: Naam van de provider voor logging.
-
-    Returns:
-        1D numpy-array met dtype float32, of None bij een ongeldige
-        embedding.
+    Er wordt bewust geen vaste dimensie afgedwongen.
     """
 
     if embedding is None:
@@ -143,11 +147,9 @@ def _validate_embedding(
             embedding,
             dtype=np.float32,
         ).flatten()
-
     except (TypeError, ValueError) as exc:
         logger.error(
-            "%s gaf een embedding terug die niet naar "
-            "numpy.float32 kan worden geconverteerd: %s",
+            "%s vectorconversie mislukt: %s",
             provider,
             exc,
         )
@@ -162,7 +164,7 @@ def _validate_embedding(
 
     if not np.all(np.isfinite(vector)):
         logger.warning(
-            "%s gaf een embedding met NaN/Inf-waarden terug.",
+            "%s gaf NaN/Inf-waarden terug.",
             provider,
         )
         return None
@@ -171,7 +173,7 @@ def _validate_embedding(
 
 
 # ---------------------------------------------------------
-# 5. OLLAMA EMBEDDING
+# 5. OLLAMA SINGLE EMBEDDING
 # ---------------------------------------------------------
 
 def get_ollama_embedding(
@@ -179,23 +181,12 @@ def get_ollama_embedding(
     model: Optional[str] = None,
 ) -> Optional[np.ndarray]:
     """
-    Genereert lokaal een embedding via Ollama.
-
-    Args:
-        text: Tekst waarvoor een embedding moet worden gemaakt.
-        model: Optioneel Ollama-model. Indien None wordt
-               EMBEDDING_MODEL gebruikt.
-
-    Returns:
-        numpy-array met embedding of None bij een fout.
+    Genereert één embedding via Ollama.
     """
 
     clean_text = text.strip() if text else ""
 
     if not clean_text:
-        logger.debug(
-            "Geen embedding gegenereerd: lege tekst."
-        )
         return None
 
     model_name = model or EMBEDDING_MODEL
@@ -208,7 +199,6 @@ def get_ollama_embedding(
             model=model_name,
             input=clean_text,
         )
-
     except Exception as exc:
         logger.warning(
             "Ollama embedding mislukt voor model '%s': %s",
@@ -217,36 +207,22 @@ def get_ollama_embedding(
         )
         return None
 
-    # -----------------------------------------------------
-    # Moderne Ollama response:
-    #
-    # {
-    #     "embeddings": [[...]]
-    # }
-    # -----------------------------------------------------
-
     embedding_data = None
 
+    # Moderne Ollama response:
+    # {"embeddings": [[...]]}
     if isinstance(response, dict):
-
         embeddings = response.get("embeddings")
 
         if isinstance(embeddings, list) and embeddings:
             embedding_data = embeddings[0]
 
-        # -------------------------------------------------
-        # Compatibiliteit met oudere response:
-        #
-        # {
-        #     "embedding": [...]
-        # }
-        # -------------------------------------------------
-
+        # Oudere response:
+        # {"embedding": [...]}
         elif isinstance(response.get("embedding"), list):
             embedding_data = response.get("embedding")
 
     else:
-        # Compatibiliteit met response-objecten
         try:
             embeddings = getattr(
                 response,
@@ -256,14 +232,12 @@ def get_ollama_embedding(
 
             if embeddings:
                 embedding_data = embeddings[0]
-
             else:
                 embedding_data = getattr(
                     response,
                     "embedding",
                     None,
                 )
-
         except Exception:
             embedding_data = None
 
@@ -272,24 +246,164 @@ def get_ollama_embedding(
         provider=f"Ollama/{model_name}",
     )
 
-    if vector is None:
-        logger.warning(
-            "Ollama leverde geen geldige embedding voor model '%s'.",
+    if vector is not None:
+        logger.debug(
+            "Ollama embedding succesvol: model=%s, dimensie=%d",
             model_name,
+            vector.shape[0],
         )
-        return None
-
-    logger.debug(
-        "Ollama embedding succesvol: model=%s, dimensie=%d",
-        model_name,
-        vector.shape[0],
-    )
 
     return vector
 
 
 # ---------------------------------------------------------
-# 6. GEMINI EMBEDDING
+# 6. OLLAMA BATCH EMBEDDINGS
+# ---------------------------------------------------------
+
+def get_ollama_embeddings_batch(
+    texts: List[str],
+    model: Optional[str] = None,
+) -> List[Optional[np.ndarray]]:
+    """
+    Genereert embeddings voor meerdere teksten.
+
+    Belangrijk:
+        De lengte en volgorde van de output zijn altijd gelijk
+        aan die van de input.
+
+        Lege invoer -> None op dezelfde positie.
+    """
+
+    if not texts:
+        return []
+
+    model_name = model or EMBEDDING_MODEL
+
+    # Output vooraf op exacte inputlengte.
+    results: List[Optional[np.ndarray]] = [None] * len(texts)
+
+    # Alleen niet-lege teksten naar Ollama sturen.
+    valid_items = [
+        (index, text.strip())
+        for index, text in enumerate(texts)
+        if text and text.strip()
+    ]
+
+    if not valid_items:
+        return results
+
+    if not ollama_available():
+        return results
+
+    clean_texts = [text for _, text in valid_items]
+
+    try:
+        response = ollama.embed(
+            model=model_name,
+            input=clean_texts,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Ollama batch embedding mislukt voor model '%s': %s",
+            model_name,
+            exc,
+        )
+        return results
+
+    raw_embeddings = []
+
+    if isinstance(response, dict):
+        raw_embeddings = response.get(
+            "embeddings",
+            [],
+        )
+    else:
+        raw_embeddings = getattr(
+            response,
+            "embeddings",
+            [],
+        )
+
+    if not raw_embeddings:
+        logger.warning(
+            "Ollama gaf geen batch embeddings terug voor '%s'.",
+            model_name,
+        )
+        return results
+
+    # Normaal gesproken evenveel vectors als geldige inputs.
+    # We beschermen ons tegen een afwijkende response.
+    count = min(
+        len(valid_items),
+        len(raw_embeddings),
+    )
+
+    for pos in range(count):
+        original_index = valid_items[pos][0]
+
+        vector = _validate_embedding(
+            raw_embeddings[pos],
+            provider=f"Ollama/{model_name}",
+        )
+
+        results[original_index] = vector
+
+    if len(raw_embeddings) != len(valid_items):
+        logger.warning(
+            "Ollama batchlengte onverwacht: "
+            "inputs=%d, embeddings=%d.",
+            len(valid_items),
+            len(raw_embeddings),
+        )
+
+    return results
+
+
+# ---------------------------------------------------------
+# 7. GEMINI PACING
+# ---------------------------------------------------------
+
+def _pacing_gemini() -> None:
+    """
+    Zorgt dat opeenvolgende Gemini REST-calls niet exact
+    gelijktijdig plaatsvinden.
+    """
+
+    global _last_gemini_call_time
+
+    now = time.time()
+    delta = now - _last_gemini_call_time
+
+    if delta < GEMINI_MIN_INTERVAL_SEC:
+        time.sleep(
+            GEMINI_MIN_INTERVAL_SEC - delta
+        )
+
+    _last_gemini_call_time = time.time()
+
+
+# ---------------------------------------------------------
+# 8. GEMINI RETRY DETECTIE
+# ---------------------------------------------------------
+
+def _gemini_retryable_status(status_code: int) -> bool:
+    """
+    Alleen tijdelijke server/rate-limit fouten worden opnieuw
+    geprobeerd.
+
+    403 wordt bewust NIET opnieuw geprobeerd.
+    """
+    return status_code in {
+        429,  # rate limit
+        500,  # internal server error
+        502,  # bad gateway
+        503,  # unavailable
+        504,  # gateway timeout
+    }
+
+
+# ---------------------------------------------------------
+# 9. GEMINI SINGLE EMBEDDING
 # ---------------------------------------------------------
 
 def get_gemini_embedding(
@@ -298,116 +412,323 @@ def get_gemini_embedding(
     model: Optional[str] = None,
 ) -> Optional[np.ndarray]:
     """
-    Genereert een embedding via de Gemini API.
+    Genereert één Gemini embedding.
 
-    Args:
-        text: Tekst waarvoor een embedding moet worden gemaakt.
-        api_key: Gemini API-key.
-        model: Optioneel Gemini embedding-model.
-
-    Returns:
-        numpy-array met embedding of None bij een fout.
+    De single-call variant gebruikt dezelfde retrystrategie
+    als de batchvariant.
     """
 
     clean_text = text.strip() if text else ""
 
-    if not clean_text:
+    if not clean_text or not api_key:
         return None
 
+    results = get_gemini_embeddings_batch(
+        [clean_text],
+        api_key=api_key,
+        model=model,
+    )
+
+    return results[0] if results else None
+
+
+# ---------------------------------------------------------
+# 10. GEMINI BATCH EMBEDDINGS
+# ---------------------------------------------------------
+
+def get_gemini_embeddings_batch(
+    texts: List[str],
+    api_key: str,
+    model: Optional[str] = None,
+) -> List[Optional[np.ndarray]]:
+    """
+    Genereert Gemini embeddings via batchEmbedContents.
+
+    De lengte en volgorde van de output zijn gelijk aan de input.
+
+    429 en tijdelijke 5xx-fouten worden opnieuw geprobeerd.
+    403 wordt NIET opnieuw geprobeerd.
+    """
+
+    if not texts:
+        return []
+
+    results: List[Optional[np.ndarray]] = [None] * len(texts)
+
     if not api_key:
-        return None
+        return results
 
     model_name = model or GEMINI_EMBEDDING_MODEL
 
-    # Gemini API gebruikt modelnamen zonder "models/" in het pad.
+    valid_items = [
+        (index, text.strip())
+        for index, text in enumerate(texts)
+        if text and text.strip()
+    ]
+
+    if not valid_items:
+        return results
+
     url = (
         "https://generativelanguage.googleapis.com/"
-        f"v1beta/models/{model_name}:embedContent"
+        f"v1beta/models/{model_name}:batchEmbedContents"
     )
 
     headers = {
         "Content-Type": "application/json",
     }
 
-    payload = {
-        "content": {
-            "parts": [
-                {
-                    "text": clean_text,
-                }
-            ]
+    requests_payload = [
+        {
+            "model": f"models/{model_name}",
+            "content": {
+                "parts": [
+                    {
+                        "text": text,
+                    }
+                ]
+            },
         }
+        for _, text in valid_items
+    ]
+
+    payload = {
+        "requests": requests_payload
     }
 
-    try:
-        response = requests.post(
-            url,
-            headers=headers,
-            params={"key": api_key},
-            json=payload,
-            timeout=20,
+    # Eerste poging direct, daarna de opgegeven wachttijden.
+    retry_delays = [0] + GEMINI_RETRY_DELAYS
+
+    for attempt, delay in enumerate(
+        retry_delays,
+        start=1,
+    ):
+        if delay > 0:
+            jitter = random.uniform(
+                0.1,
+                0.5,
+            )
+
+            wait_time = delay + jitter
+
+            logger.info(
+                "Gemini embedding tijdelijk niet beschikbaar. "
+                "Nieuwe poging over %.2f sec.",
+                wait_time,
+            )
+
+            time.sleep(wait_time)
+
+        _pacing_gemini()
+
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                params={"key": api_key},
+                json=payload,
+                timeout=30,
+            )
+
+        except requests.exceptions.Timeout:
+            logger.warning(
+                "Gemini embedding timeout "
+                "(poging %d/%d).",
+                attempt,
+                len(retry_delays),
+            )
+
+            if attempt >= len(retry_delays):
+                break
+
+            continue
+
+        except requests.exceptions.RequestException as exc:
+            logger.warning(
+                "Netwerkfout Gemini embedding "
+                "(poging %d/%d): %s",
+                attempt,
+                len(retry_delays),
+                exc,
+            )
+
+            if attempt >= len(retry_delays):
+                break
+
+            continue
+
+        status = response.status_code
+
+        if _gemini_retryable_status(status):
+            logger.warning(
+                "Gemini embedding HTTP %d "
+                "(poging %d/%d).",
+                status,
+                attempt,
+                len(retry_delays),
+            )
+
+            if attempt >= len(retry_delays):
+                break
+
+            continue
+
+        if status == 403:
+            # Bewust geen retry-loop.
+            logger.error(
+                "Gemini embedding gaf HTTP 403 Forbidden. "
+                "De aanvraag wordt niet opnieuw geprobeerd."
+            )
+            return results
+
+        if status < 200 or status >= 300:
+            logger.error(
+                "Gemini embedding HTTP %d: %s",
+                status,
+                response.text[:500],
+            )
+            return results
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            logger.error(
+                "Gemini gaf geen geldige JSON-response: %s",
+                exc,
+            )
+            return results
+
+        raw_embeddings = data.get(
+            "embeddings",
+            [],
         )
 
-        response.raise_for_status()
+        if not isinstance(
+            raw_embeddings,
+            list,
+        ):
+            logger.error(
+                "Gemini batchresponse bevat geen geldige "
+                "'embeddings'-lijst."
+            )
+            return results
 
-        data = response.json()
-
-    except requests.exceptions.Timeout:
-        logger.error(
-            "Timeout bij Gemini embedding API."
+        count = min(
+            len(valid_items),
+            len(raw_embeddings),
         )
-        return None
 
-    except requests.exceptions.RequestException as exc:
-        logger.error(
-            "Netwerkfout bij Gemini embedding API: %s",
-            exc,
-        )
-        return None
+        for pos in range(count):
+            original_index = valid_items[pos][0]
 
-    except ValueError as exc:
-        logger.error(
-            "Gemini gaf geen geldige JSON-response: %s",
-            exc,
-        )
-        return None
+            item = raw_embeddings[pos]
 
-    # Verwachte structuur:
-    #
-    # {
-    #   "embedding": {
-    #       "values": [...]
-    #   }
-    # }
+            values = (
+                item.get("values", [])
+                if isinstance(item, dict)
+                else []
+            )
 
-    embedding_data = (
-        data
-        .get("embedding", {})
-        .get("values")
+            vector = _validate_embedding(
+                values,
+                provider=f"Gemini/{model_name}",
+            )
+
+            results[original_index] = vector
+
+        if len(raw_embeddings) != len(valid_items):
+            logger.warning(
+                "Gemini batchlengte onverwacht: "
+                "inputs=%d, embeddings=%d.",
+                len(valid_items),
+                len(raw_embeddings),
+            )
+
+        return results
+
+    logger.error(
+        "Gemini batch embedding finaal mislukt "
+        "na %d pogingen.",
+        len(retry_delays),
     )
 
-    vector = _validate_embedding(
-        embedding_data,
-        provider=f"Gemini/{model_name}",
-    )
-
-    if vector is None:
-        logger.warning(
-            "Gemini leverde geen geldige embedding."
-        )
-        return None
-
-    logger.debug(
-        "Gemini embedding succesvol: model=%s, dimensie=%d",
-        model_name,
-        vector.shape[0],
-    )
-
-    return vector
+    return results
 
 
 # ---------------------------------------------------------
-# 7. CENTRALE EMBEDDING FUNCTIE
+# 11. CENTRALE BATCH ROUTING
+# ---------------------------------------------------------
+
+def get_embeddings_batch(
+    texts: List[str],
+    model: Optional[str] = None,
+) -> List[Optional[np.ndarray]]:
+    """
+    Centrale batch embeddingfunctie.
+
+    Strategie:
+        1. probeer de volledige batch lokaal via Ollama
+        2. als de lokale batch niet volledig lukt:
+           probeer de volledige batch via Gemini
+        3. nooit stilletjes Ollama- en Gemini-vectoren
+           door elkaar mengen binnen dezelfde batch
+
+    De output heeft altijd dezelfde lengte als texts.
+    """
+
+    if not texts:
+        return []
+
+    model_name = model or EMBEDDING_MODEL
+
+    # -----------------------------------------------------
+    # 1. OLLAMA
+    # -----------------------------------------------------
+
+    if ollama_available():
+        ollama_results = get_ollama_embeddings_batch(
+            texts,
+            model=model_name,
+        )
+
+        if (
+            len(ollama_results) == len(texts)
+            and all(
+                vector is not None
+                for vector in ollama_results
+            )
+        ):
+            return ollama_results
+
+        logger.warning(
+            "Ollama kon niet alle embeddings van de batch "
+            "genereren; Gemini wordt voor de volledige batch "
+            "als fallback geprobeerd."
+        )
+
+    # -----------------------------------------------------
+    # 2. GEMINI
+    # -----------------------------------------------------
+
+    api_key = get_gemini_api_key()
+
+    if api_key:
+        gemini_results = get_gemini_embeddings_batch(
+            texts,
+            api_key=api_key,
+        )
+
+        return gemini_results
+
+    # -----------------------------------------------------
+    # 3. GEEN PROVIDER
+    # -----------------------------------------------------
+
+    return [None] * len(texts)
+
+
+# ---------------------------------------------------------
+# 12. GECACHETE SINGLE EMBEDDING
 # ---------------------------------------------------------
 
 @st.cache_data(show_spinner=False)
@@ -416,31 +737,10 @@ def get_embedding_cached(
     model: Optional[str] = None,
 ) -> Optional[np.ndarray]:
     """
-    Centrale functie voor embedding-generatie.
+    Centrale gecachete single embedding.
 
     Provider-volgorde:
-        1. Ollama
-        2. Gemini
-
-    Belangrijk:
-        Deze functie retourneert NOOIT een nulvector.
-
-        Bij een echte embedding-fout wordt None teruggegeven.
-        Hierdoor kan de retrieval-laag herkennen dat embeddings
-        niet beschikbaar zijn en kan zij transparant besluiten
-        wat zij moet doen.
-
-    Args:
-        text:
-            Tekst waarvoor een embedding moet worden gemaakt.
-
-        model:
-            Optioneel Ollama-model. Als None wordt het centraal
-            geconfigureerde EMBEDDING_MODEL gebruikt.
-
-    Returns:
-        numpy.ndarray met dynamische dimensie,
-        of None wanneer geen provider beschikbaar is.
+        Ollama -> Gemini
     """
 
     clean_text = text.strip() if text else ""
@@ -450,10 +750,6 @@ def get_embedding_cached(
 
     model_name = model or EMBEDDING_MODEL
 
-    # -----------------------------------------------------
-    # 1. LOKALE OLLAMA
-    # -----------------------------------------------------
-
     embedding = get_ollama_embedding(
         text=clean_text,
         model=model_name,
@@ -461,10 +757,6 @@ def get_embedding_cached(
 
     if embedding is not None:
         return embedding
-
-    # -----------------------------------------------------
-    # 2. GEMINI FALLBACK
-    # -----------------------------------------------------
 
     gemini_api_key = get_gemini_api_key()
 
@@ -477,13 +769,8 @@ def get_embedding_cached(
         if embedding is not None:
             return embedding
 
-    # -----------------------------------------------------
-    # 3. GEEN SILENTE NULVECTOR
-    # -----------------------------------------------------
-
     logger.error(
-        "Geen embedding-provider kon een embedding genereren. "
-        "Ollama-model='%s'.",
+        "Geen embedding-provider kon '%s' embedden.",
         model_name,
     )
 
@@ -491,7 +778,7 @@ def get_embedding_cached(
 
 
 # ---------------------------------------------------------
-# 8. NIET-GECACHETE VERSIE
+# 13. NIET-GECACHETE SINGLE EMBEDDING
 # ---------------------------------------------------------
 
 def get_embedding(
@@ -500,16 +787,6 @@ def get_embedding(
 ) -> Optional[np.ndarray]:
     """
     Niet-gecachete variant van get_embedding_cached().
-
-    Handig voor situaties waarin direct een nieuwe embedding
-    nodig is zonder gebruik te maken van Streamlit's cache.
-
-    Args:
-        text: Tekst waarvoor een embedding nodig is.
-        model: Optioneel Ollama-model.
-
-    Returns:
-        numpy.ndarray of None.
     """
 
     clean_text = text.strip() if text else ""
@@ -519,7 +796,6 @@ def get_embedding(
 
     model_name = model or EMBEDDING_MODEL
 
-    # Ollama
     embedding = get_ollama_embedding(
         text=clean_text,
         model=model_name,
@@ -528,7 +804,6 @@ def get_embedding(
     if embedding is not None:
         return embedding
 
-    # Gemini
     gemini_api_key = get_gemini_api_key()
 
     if gemini_api_key:
@@ -544,7 +819,7 @@ def get_embedding(
 
 
 # ---------------------------------------------------------
-# 9. EMBEDDING DIMENSIE
+# 14. EMBEDDING DIMENSIE
 # ---------------------------------------------------------
 
 def get_embedding_dimension(
@@ -552,14 +827,6 @@ def get_embedding_dimension(
 ) -> Optional[int]:
     """
     Geeft de daadwerkelijke dimensie van een embedding terug.
-
-    Er wordt bewust geen globale EMBEDDING_DIMENSION gebruikt.
-
-    Args:
-        embedding: Een embedding-vector.
-
-    Returns:
-        Het aantal dimensies, of None.
     """
 
     if embedding is None:
@@ -578,7 +845,7 @@ def get_embedding_dimension(
 
 
 # ---------------------------------------------------------
-# 10. MODEL SUPPORT CHECK
+# 15. MODEL SUPPORT CHECK
 # ---------------------------------------------------------
 
 @st.cache_data(show_spinner=False)
@@ -586,19 +853,10 @@ def model_supports_embeddings(
     model_name: str,
 ) -> bool:
     """
-    Controleert op basis van de modelnaam of een model
-    waarschijnlijk embeddings ondersteunt.
+    Snelle naamgebaseerde indicatie of een model waarschijnlijk
+    een embedding-model is.
 
-    Dit is uitsluitend een snelle compatibiliteitscheck.
-    De daadwerkelijke controle gebeurt pas wanneer Ollama
-    het model aanspreekt.
-
-    Args:
-        model_name: Naam van het model.
-
-    Returns:
-        True wanneer de naam overeenkomt met bekende
-        embedding-modellen.
+    Dit vervangt geen daadwerkelijke Ollama-test.
     """
 
     if not model_name:
@@ -630,53 +888,43 @@ def model_supports_embeddings(
 
 
 # ---------------------------------------------------------
-# 11. EMBEDDING STATUS / DIAGNOSTIEK
+# 16. EMBEDDING STATUS
 # ---------------------------------------------------------
 
 def get_embedding_status(
     model: Optional[str] = None,
 ) -> dict:
     """
-    Geeft diagnostische informatie over de embedding-configuratie.
-
-    Deze functie genereert zelf geen embedding.
-
-    Returns:
-        Dictionary met provider- en configuratiestatus.
+    Geeft diagnostische informatie zonder een embedding
+    te genereren.
     """
 
     model_name = model or EMBEDDING_MODEL
-    gemini_key_available = bool(
-        get_gemini_api_key()
-    )
-
-    ollama_online = ollama_available()
 
     return {
         "embedding_model": model_name,
-        "ollama_available": ollama_online,
+        "ollama_available": ollama_available(),
         "ollama_model_likely_supports_embeddings":
             model_supports_embeddings(model_name),
-        "gemini_available": gemini_key_available,
-        "gemini_embedding_model": GEMINI_EMBEDDING_MODEL,
+        "gemini_available": bool(
+            get_gemini_api_key()
+        ),
+        "gemini_embedding_model":
+            GEMINI_EMBEDDING_MODEL,
     }
 
 
 # ---------------------------------------------------------
-# 12. CACHE RESET
+# 17. CACHE RESET
 # ---------------------------------------------------------
 
 def clear_embedding_cache() -> None:
     """
     Leegt de Streamlit embedding-cache.
-
-    Handig nadat het embedding-model in config.py is gewijzigd
-    of nadat documenten opnieuw geïndexeerd moeten worden.
     """
 
     try:
         get_embedding_cached.clear()
-
     except Exception as exc:
         logger.warning(
             "Kon embedding-cache niet wissen: %s",
